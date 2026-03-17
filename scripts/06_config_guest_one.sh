@@ -417,34 +417,48 @@ configure_ssh_single_file() {
   cp -a /etc/ssh/sshd_config "$BACKUP_DIR/ssh/" || true
   cp -a /etc/ssh/sshd_config.d "$BACKUP_DIR/ssh/" || true
 
-  if ! grep -Eq '^\s*Include\s+/etc/ssh/sshd_config\.d/\*\.conf\s*$' /etc/ssh/sshd_config; then
-    sed -i '1i Include /etc/ssh/sshd_config.d/*.conf' /etc/ssh/sshd_config
-  fi
+  ssh_supports_dropin() {
+    local test_cfg test_cfg_new test_dir
+    test_cfg="$(mktemp)"
+    test_cfg_new="$(mktemp)"
+    test_dir="$(mktemp -d)"
+    cp -a /etc/ssh/sshd_config "$test_cfg"
+    {
+      echo "Include $test_dir/*.conf"
+      cat "$test_cfg"
+    } > "$test_cfg_new"
+    mv -f "$test_cfg_new" "$test_cfg"
+    printf 'PermitRootLogin yes\nPasswordAuthentication yes\nPubkeyAuthentication yes\n' > "$test_dir/99-phase2-root.conf"
+    install -d -m 755 /run/sshd
+    if sshd -t -f "$test_cfg" >/dev/null 2>&1; then
+      rm -f "$test_cfg"
+      rm -rf "$test_dir"
+      return 0
+    fi
+    rm -f "$test_cfg"
+    rm -rf "$test_dir"
+    return 1
+  }
 
-  sed -ri \
-    -e 's/^\s*(PermitRootLogin|PasswordAuthentication|PubkeyAuthentication)\b/# disabled-by-phase2 &/I' \
-    /etc/ssh/sshd_config
+  strip_root_auth_directives() {
+    sed -ri \
+      -e '/^\s*# BEGIN phase2 managed block$/,/^\s*# END phase2 managed block$/d' \
+      -e 's/^\s*(PermitRootLogin|PasswordAuthentication|PubkeyAuthentication)\b/# disabled-by-phase2 &/I' \
+      /etc/ssh/sshd_config
+  }
 
-  mkdir -p /etc/ssh/sshd_config.d
-  find /etc/ssh/sshd_config.d -maxdepth 1 -type f -name '*.conf' -exec rm -f {} +
+  ensure_root_ssh_material() {
+    echo "root:$ROOT_PASSWORD" | chpasswd
 
-  cat > /etc/ssh/sshd_config.d/99-phase2-root.conf <<EOF_SSH
-PermitRootLogin $ROOT_SSH_PERMIT
-PasswordAuthentication $ROOT_PASSWORD_AUTH
-PubkeyAuthentication $ROOT_PUBKEY_AUTH
-EOF_SSH
+    install -d -m 700 /root/.ssh
+    touch /root/.ssh/authorized_keys
+    chmod 600 /root/.ssh/authorized_keys
+    if [[ -n "$ROOT_AUTHORIZED_KEY" ]]; then
+      grep -qxF "$ROOT_AUTHORIZED_KEY" /root/.ssh/authorized_keys || echo "$ROOT_AUTHORIZED_KEY" >> /root/.ssh/authorized_keys
+    fi
 
-  echo "root:$ROOT_PASSWORD" | chpasswd
-
-  install -d -m 700 /root/.ssh
-  touch /root/.ssh/authorized_keys
-  chmod 600 /root/.ssh/authorized_keys
-  if [[ -n "$ROOT_AUTHORIZED_KEY" ]]; then
-    grep -qxF "$ROOT_AUTHORIZED_KEY" /root/.ssh/authorized_keys || echo "$ROOT_AUTHORIZED_KEY" >> /root/.ssh/authorized_keys
-  fi
-
-  mkdir -p /var/lib/cloud/scripts/per-instance
-  cat > /var/lib/cloud/scripts/per-instance/10-root-authorized-keys.sh <<'EOF_KEYS'
+    mkdir -p /var/lib/cloud/scripts/per-instance
+    cat > /var/lib/cloud/scripts/per-instance/10-root-authorized-keys.sh <<'EOF_KEYS'
 #!/usr/bin/env bash
 set -euo pipefail
 install -d -m 700 /root/.ssh
@@ -457,19 +471,73 @@ for f in /home/*/.ssh/authorized_keys; do
 done
 sort -u /root/.ssh/authorized_keys -o /root/.ssh/authorized_keys || true
 EOF_KEYS
-  chmod 755 /var/lib/cloud/scripts/per-instance/10-root-authorized-keys.sh
+    chmod 755 /var/lib/cloud/scripts/per-instance/10-root-authorized-keys.sh
+  }
+
+  if [[ "$UBUNTU_VERSION_ID" == "18.04" ]]; then
+    SSH_CONFIG_STRATEGY="legacy-main-file"
+  elif ssh_supports_dropin; then
+    SSH_CONFIG_STRATEGY="dropin"
+  else
+    SSH_CONFIG_STRATEGY="legacy-main-file"
+  fi
+  export SSH_CONFIG_STRATEGY
+  log "ssh config strategy: $SSH_CONFIG_STRATEGY"
+
+  strip_root_auth_directives
+  ensure_root_ssh_material
+
+  case "$SSH_CONFIG_STRATEGY" in
+    dropin)
+      if ! grep -Eq '^\s*Include\s+/etc/ssh/sshd_config\.d/\*\.conf\s*$' /etc/ssh/sshd_config; then
+        sed -i '1i Include /etc/ssh/sshd_config.d/*.conf' /etc/ssh/sshd_config
+      fi
+      mkdir -p /etc/ssh/sshd_config.d
+      find /etc/ssh/sshd_config.d -maxdepth 1 -type f -name '*.conf' -exec rm -f {} +
+      cat > /etc/ssh/sshd_config.d/99-phase2-root.conf <<EOF_SSH
+PermitRootLogin $ROOT_SSH_PERMIT
+PasswordAuthentication $ROOT_PASSWORD_AUTH
+PubkeyAuthentication $ROOT_PUBKEY_AUTH
+EOF_SSH
+      ;;
+    legacy-main-file)
+      sed -ri '/^\s*Include\s+\/etc\/ssh\/sshd_config\.d\/\*\.conf\s*$/d' /etc/ssh/sshd_config
+      if [[ -d /etc/ssh/sshd_config.d ]]; then
+        find /etc/ssh/sshd_config.d -maxdepth 1 -type f -name '*.conf' -exec rm -f {} +
+      fi
+      cat >> /etc/ssh/sshd_config <<EOF_SSH
+# BEGIN phase2 managed block
+PermitRootLogin $ROOT_SSH_PERMIT
+PasswordAuthentication $ROOT_PASSWORD_AUTH
+PubkeyAuthentication $ROOT_PUBKEY_AUTH
+# END phase2 managed block
+EOF_SSH
+      ;;
+    *)
+      echo "Unknown SSH_CONFIG_STRATEGY: $SSH_CONFIG_STRATEGY" >&2
+      exit 1
+      ;;
+  esac
 
   install -d -m 755 /run/sshd
   sshd -t
   systemctl restart ssh || systemctl restart sshd
 
   install -d -m 755 /run/sshd
-  test "$(find /etc/ssh/sshd_config.d -maxdepth 1 -type f -name '*.conf' | wc -l | tr -d ' ')" = "1"
   local sshd_effective
   sshd_effective="$(sshd -T)"
   grep -qi '^permitrootlogin yes$' <<<"$sshd_effective"
   grep -qi '^passwordauthentication yes$' <<<"$sshd_effective"
   grep -qi '^pubkeyauthentication yes$' <<<"$sshd_effective"
+
+  case "$SSH_CONFIG_STRATEGY" in
+    dropin)
+      test -f /etc/ssh/sshd_config.d/99-phase2-root.conf
+      ;;
+    legacy-main-file)
+      grep -q '^# BEGIN phase2 managed block$' /etc/ssh/sshd_config
+      ;;
+  esac
 }
 
 configure_locale_timezone() {
@@ -542,7 +610,7 @@ cleanup_success_artifacts() {
 validate_state() {
   cloud-init status || true
   install -d -m 755 /run/sshd
-  test "$(find /etc/ssh/sshd_config.d -maxdepth 1 -type f -name '*.conf' | wc -l | tr -d ' ')" = "1"
+
   local sshd_effective
   sshd_effective="$(sshd -T)"
   grep -qi '^permitrootlogin yes$' <<<"$sshd_effective"
@@ -552,10 +620,23 @@ validate_state() {
   test "$(timedatectl show -p Timezone --value 2>/dev/null || true)" = "$TIMEZONE"
   test -f /var/lib/cloud/scripts/per-instance/10-root-authorized-keys.sh
 
+  if [[ -f /etc/ssh/sshd_config.d/99-phase2-root.conf ]]; then
+    SSH_CONFIG_STRATEGY="dropin"
+  else
+    SSH_CONFIG_STRATEGY="legacy-main-file"
+  fi
+  export SSH_CONFIG_STRATEGY
+
   log "validation summary"
+  log "ssh config strategy: $SSH_CONFIG_STRATEGY"
   cloud-init status || true
-  find /etc/ssh/sshd_config.d -maxdepth 1 -type f -name '*.conf' -printf '%f\n' | sort
+  if [[ -d /etc/ssh/sshd_config.d ]]; then
+    find /etc/ssh/sshd_config.d -maxdepth 1 -type f -name '*.conf' -printf '%f\n' | sort || true
+  fi
   grep -Ei 'permitrootlogin|passwordauthentication|pubkeyauthentication' <<<"$sshd_effective" || true
+  if [[ "$SSH_CONFIG_STRATEGY" == "legacy-main-file" ]]; then
+    sed -n '/^# BEGIN phase2 managed block$/,/^# END phase2 managed block$/p' /etc/ssh/sshd_config || true
+  fi
   locale || true
   timedatectl | sed -n '1,8p' || true
   sed -n '1,20p' /etc/apt/sources.list || true
