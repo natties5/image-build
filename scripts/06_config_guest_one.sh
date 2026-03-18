@@ -617,7 +617,15 @@ validate_state() {
   grep -qi '^passwordauthentication yes$' <<<"$sshd_effective"
   grep -qi '^pubkeyauthentication yes$' <<<"$sshd_effective"
   grep -q '^LANG=en_US.UTF-8' /etc/default/locale
-  test "$(timedatectl show -p Timezone --value 2>/dev/null || true)" = "$TIMEZONE"
+local tz_current=""
+tz_current="$(timedatectl show -p Timezone --value 2>/dev/null || true)"
+if [[ -z "$tz_current" && -f /etc/timezone ]]; then
+  tz_current="$(tr -d ' \t\r\n' < /etc/timezone || true)"
+fi
+if [[ -z "$tz_current" && -L /etc/localtime ]]; then
+  tz_current="$(readlink -f /etc/localtime 2>/dev/null | sed 's#^.*/zoneinfo/##' || true)"
+fi
+test "$tz_current" = "$TIMEZONE"
   test -f /var/lib/cloud/scripts/per-instance/10-root-authorized-keys.sh
 
   if [[ -f /etc/ssh/sshd_config.d/99-phase2-root.conf ]]; then
