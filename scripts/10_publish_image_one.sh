@@ -47,6 +47,8 @@ DELETE_VOLUME_AFTER_PUBLISH="${DELETE_VOLUME_AFTER_PUBLISH:-yes}"
 DELETE_BASE_IMAGE_AFTER_PUBLISH="${DELETE_BASE_IMAGE_AFTER_PUBLISH:-yes}"
 SET_OS_DISTRO_PROPERTY="${SET_OS_DISTRO_PROPERTY:-yes}"
 SET_OS_VERSION_PROPERTY="${SET_OS_VERSION_PROPERTY:-yes}"
+FINAL_DISK_FORMAT="${FINAL_DISK_FORMAT:-qcow2}"
+FINAL_CONTAINER_FORMAT="${FINAL_CONTAINER_FORMAT:-bare}"
 
 RUN_ID="$(date +%Y%m%d%H%M%S)"
 TODAY_YYYYMMDD="$(date +%Y%m%d)"
@@ -89,18 +91,6 @@ wait_for_volume_status() {
     [[ "$st" == "error" || "$st" == "error_restoring" || "$st" == "error_extending" || "$st" == "error_managing" ]] && die "volume entered bad status=$st"
     now="$(date +%s)"
     (( now - start >= timeout_sec )) && die "timeout waiting for volume status=$desired last_status=${st:-unknown}"
-    sleep "$interval_sec"
-  done
-}
-
-wait_for_image_id_by_name() {
-  local name="$1" timeout_sec="$2" interval_sec="$3" start now found
-  start="$(date +%s)"
-  while true; do
-    found="$(find_final_image_id_by_name "$name")"
-    [[ -n "$found" ]] && { printf '%s' "$found"; return 0; }
-    now="$(date +%s)"
-    (( now - start >= timeout_sec )) && die "timeout waiting for image id by name=$name"
     sleep "$interval_sec"
   done
 }
@@ -154,6 +144,8 @@ VERSION=$VERSION
 FINAL_IMAGE_NAME=$image_name
 FINAL_IMAGE_ID=$image_id
 FINAL_IMAGE_STATUS=$image_status_now
+FINAL_DISK_FORMAT=$FINAL_DISK_FORMAT
+FINAL_CONTAINER_FORMAT=$FINAL_CONTAINER_FORMAT
 SOURCE_SERVER_ID=$SERVER_ID
 SOURCE_VOLUME_ID=$VOLUME_ID
 SOURCE_BASE_IMAGE_ID=$BASE_IMAGE_ID
@@ -202,6 +194,7 @@ VERSION=$VERSION
 FINAL_IMAGE_NAME=$final_image_name
 FINAL_IMAGE_ID=$existing_final_id
 FINAL_IMAGE_STATUS=$existing_status
+FINAL_DISK_FORMAT=$FINAL_DISK_FORMAT
 SOURCE_SERVER_ID=$SERVER_ID
 SOURCE_VOLUME_ID=$VOLUME_ID
 SOURCE_BASE_IMAGE_ID=$BASE_IMAGE_ID
@@ -258,16 +251,26 @@ else
   [[ "$pre_server_status" == "SHUTOFF" ]] || die "server must be SHUTOFF before publish when DELETE_SERVER_BEFORE_PUBLISH=no"
 fi
 
-log "creating final image from volume_id=$VOLUME_ID name=$final_image_name"
-openstack image create "$final_image_name" --volume "$VOLUME_ID" >/dev/null
+log "uploading volume to image as $FINAL_DISK_FORMAT from volume_id=$VOLUME_ID name=$final_image_name"
+openstack volume upload-to-image \
+  --disk-format "$FINAL_DISK_FORMAT" \
+  --container-format "$FINAL_CONTAINER_FORMAT" \
+  --image-name "$final_image_name" \
+  "$VOLUME_ID" >/dev/null
+
+final_image_id=""
+start_ts="$(date +%s)"
+while true; do
+  final_image_id="$(find_final_image_id_by_name "$final_image_name")"
+  [[ -n "$final_image_id" ]] && break
+  now_ts="$(date +%s)"
+  (( now_ts - start_ts >= 600 )) && die "timeout waiting for image id by final name=$final_image_name"
+  sleep 5
+done
 
 if [[ "$WAIT_FOR_FINAL_ACTIVE" == "yes" ]]; then
-  log "waiting for image id by final name=$final_image_name"
-  final_image_id="$(wait_for_image_id_by_name "$final_image_name" 600 5)"
   log "waiting for final image to become active id=$final_image_id"
   wait_for_image_status "$final_image_id" active "$WAIT_FINAL_TIMEOUT_SECONDS" "$WAIT_FINAL_INTERVAL_SECONDS"
-else
-  final_image_id="$(wait_for_image_id_by_name "$final_image_name" 600 5)"
 fi
 
 final_image_status="$(image_status "$final_image_id")"
@@ -284,6 +287,7 @@ VERSION=$VERSION
 FINAL_IMAGE_NAME=$final_image_name
 FINAL_IMAGE_ID=$final_image_id
 FINAL_IMAGE_STATUS=$final_image_status
+FINAL_DISK_FORMAT=$FINAL_DISK_FORMAT
 SOURCE_SERVER_ID=$SERVER_ID
 SOURCE_VOLUME_ID=$VOLUME_ID
 SOURCE_BASE_IMAGE_ID=$BASE_IMAGE_ID
