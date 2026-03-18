@@ -59,7 +59,6 @@ trap 'die "line=$LINENO cmd=$BASH_COMMAND"' ERR
 
 need_cmd(){ command -v "$1" >/dev/null 2>&1 || die "missing command: $1"; }
 for c in openstack awk grep sed head; do need_cmd "$c"; done
-
 openstack token issue >/dev/null
 
 # shellcheck disable=SC1090
@@ -69,7 +68,6 @@ VERSION="${VERSION:-unknown}"
 SERVER_ID="${SERVER_ID:-}"
 VOLUME_ID="${VOLUME_ID:-}"
 BASE_IMAGE_ID="${IMAGE_ID:-}"
-VM_NAME="${VM_NAME:-}"
 [[ -n "$SERVER_ID" && -n "$VOLUME_ID" && -n "$BASE_IMAGE_ID" ]] || die "SERVER_ID/VOLUME_ID/IMAGE_ID missing in $CONFIG_FILE"
 
 server_exists() { openstack server show "$SERVER_ID" >/dev/null 2>&1; }
@@ -77,6 +75,10 @@ server_status() { openstack server show "$SERVER_ID" -f value -c status 2>/dev/n
 volume_exists() { openstack volume show "$VOLUME_ID" >/dev/null 2>&1; }
 volume_status() { openstack volume show "$VOLUME_ID" -f value -c status 2>/dev/null || true; }
 image_status() { openstack image show "$1" -f value -c status 2>/dev/null || true; }
+
+find_final_image_id_by_name() {
+  openstack image list --name "$1" -f value -c ID | head -n1 || true
+}
 
 wait_for_volume_status() {
   local desired="$1" timeout_sec="$2" interval_sec="$3" st start now
@@ -87,6 +89,18 @@ wait_for_volume_status() {
     [[ "$st" == "error" || "$st" == "error_restoring" || "$st" == "error_extending" || "$st" == "error_managing" ]] && die "volume entered bad status=$st"
     now="$(date +%s)"
     (( now - start >= timeout_sec )) && die "timeout waiting for volume status=$desired last_status=${st:-unknown}"
+    sleep "$interval_sec"
+  done
+}
+
+wait_for_image_id_by_name() {
+  local name="$1" timeout_sec="$2" interval_sec="$3" start now found
+  start="$(date +%s)"
+  while true; do
+    found="$(find_final_image_id_by_name "$name")"
+    [[ -n "$found" ]] && { printf '%s' "$found"; return 0; }
+    now="$(date +%s)"
+    (( now - start >= timeout_sec )) && die "timeout waiting for image id by name=$name"
     sleep "$interval_sec"
   done
 }
@@ -113,6 +127,23 @@ safe_set_visibility() {
     shared) openstack image set --shared "$image_id" || true ;;
     *) die "invalid FINAL_IMAGE_VISIBILITY=$FINAL_IMAGE_VISIBILITY" ;;
   esac
+}
+
+apply_metadata() {
+  local image_id="$1"
+  if [[ "$SET_OS_DISTRO_PROPERTY" == "yes" ]]; then openstack image set --property os_distro=ubuntu "$image_id" || true; fi
+  if [[ "$SET_OS_VERSION_PROPERTY" == "yes" ]]; then openstack image set --property os_version="$VERSION" "$image_id" || true; fi
+  openstack image set --property pipeline_stage=complete "$image_id" || true
+  openstack image set --property source_server_id="$SERVER_ID" "$image_id" || true
+  openstack image set --property source_volume_id="$VOLUME_ID" "$image_id" || true
+  openstack image set --property source_base_image_id="$BASE_IMAGE_ID" "$image_id" || true
+  IFS=',' read -r -a tags_array <<< "$FINAL_IMAGE_TAGS"
+  for tag in "${tags_array[@]}"; do
+    tag="$(printf '%s' "$tag" | xargs)"
+    [[ -n "$tag" ]] || continue
+    openstack image set --tag "$tag" "$image_id" || true
+  done
+  safe_set_visibility "$image_id"
 }
 
 write_manifest() {
@@ -150,7 +181,7 @@ cleanup_sources() {
 }
 
 final_image_name="ubuntu-${VERSION}-complete-${TODAY_YYYYMMDD}"
-existing_final_id="$(openstack image list --name "$final_image_name" -f value -c ID | head -n1 || true)"
+existing_final_id="$(find_final_image_id_by_name "$final_image_name")"
 
 if [[ -n "$existing_final_id" ]]; then
   existing_status="$(image_status "$existing_final_id")"
@@ -161,19 +192,7 @@ if [[ -n "$existing_final_id" ]]; then
     recover)
       if [[ "$existing_status" == "active" ]]; then
         log "final image already exists and is active -> recover success: $final_image_name id=$existing_final_id"
-        if [[ "$SET_OS_DISTRO_PROPERTY" == "yes" ]]; then openstack image set --property os_distro=ubuntu "$existing_final_id" || true; fi
-        if [[ "$SET_OS_VERSION_PROPERTY" == "yes" ]]; then openstack image set --property os_version="$VERSION" "$existing_final_id" || true; fi
-        openstack image set --property pipeline_stage=complete "$existing_final_id" || true
-        openstack image set --property source_server_id="$SERVER_ID" "$existing_final_id" || true
-        openstack image set --property source_volume_id="$VOLUME_ID" "$existing_final_id" || true
-        openstack image set --property source_base_image_id="$BASE_IMAGE_ID" "$existing_final_id" || true
-        IFS=',' read -r -a tags_array <<< "$FINAL_IMAGE_TAGS"
-        for tag in "${tags_array[@]}"; do
-          tag="$(printf '%s' "$tag" | xargs)"
-          [[ -n "$tag" ]] || continue
-          openstack image set --tag "$tag" "$existing_final_id" || true
-        done
-        safe_set_visibility "$existing_final_id"
+        apply_metadata "$existing_final_id"
         manifest_file="$(write_manifest "$existing_final_id" "$final_image_name" "$existing_status")"
         cleanup_sources
         summary_file="$LOG_DIR/10_publish_image_one_${VERSION}_${RUN_ID}.summary.txt"
@@ -200,6 +219,7 @@ EOF
         log "final image already exists and still progressing -> waiting id=$existing_final_id status=$existing_status"
         wait_for_image_status "$existing_final_id" active "$WAIT_FINAL_TIMEOUT_SECONDS" "$WAIT_FINAL_INTERVAL_SECONDS"
         existing_status="$(image_status "$existing_final_id")"
+        apply_metadata "$existing_final_id"
         manifest_file="$(write_manifest "$existing_final_id" "$final_image_name" "$existing_status")"
         cleanup_sources
         log "DONE"
@@ -239,33 +259,21 @@ else
 fi
 
 log "creating final image from volume_id=$VOLUME_ID name=$final_image_name"
-final_image_id="$(openstack image create "$final_image_name" --volume "$VOLUME_ID" -f value -c id)"
-[[ -n "$final_image_id" ]] || die "failed to create final image"
+openstack image create "$final_image_name" --volume "$VOLUME_ID" >/dev/null
 
 if [[ "$WAIT_FOR_FINAL_ACTIVE" == "yes" ]]; then
+  log "waiting for image id by final name=$final_image_name"
+  final_image_id="$(wait_for_image_id_by_name "$final_image_name" 600 5)"
   log "waiting for final image to become active id=$final_image_id"
   wait_for_image_status "$final_image_id" active "$WAIT_FINAL_TIMEOUT_SECONDS" "$WAIT_FINAL_INTERVAL_SECONDS"
+else
+  final_image_id="$(wait_for_image_id_by_name "$final_image_name" 600 5)"
 fi
 
 final_image_status="$(image_status "$final_image_id")"
 [[ "$final_image_status" == "active" ]] || die "final image not active: id=$final_image_id status=$final_image_status"
 
-if [[ "$SET_OS_DISTRO_PROPERTY" == "yes" ]]; then openstack image set --property os_distro=ubuntu "$final_image_id" || true; fi
-if [[ "$SET_OS_VERSION_PROPERTY" == "yes" ]]; then openstack image set --property os_version="$VERSION" "$final_image_id" || true; fi
-openstack image set --property pipeline_stage=complete "$final_image_id" || true
-openstack image set --property source_server_id="$SERVER_ID" "$final_image_id" || true
-openstack image set --property source_volume_id="$VOLUME_ID" "$final_image_id" || true
-openstack image set --property source_base_image_id="$BASE_IMAGE_ID" "$final_image_id" || true
-
-IFS=',' read -r -a tags_array <<< "$FINAL_IMAGE_TAGS"
-for tag in "${tags_array[@]}"; do
-  tag="$(printf '%s' "$tag" | xargs)"
-  [[ -n "$tag" ]] || continue
-  openstack image set --tag "$tag" "$final_image_id" || true
-done
-
-safe_set_visibility "$final_image_id"
-
+apply_metadata "$final_image_id"
 manifest_file="$(write_manifest "$final_image_id" "$final_image_name" "$final_image_status")"
 cleanup_sources
 
