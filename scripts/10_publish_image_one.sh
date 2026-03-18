@@ -1,5 +1,7 @@
+\
 #!/usr/bin/env bash
 set -Eeuo pipefail
+
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 STATE_DIR="${STATE_DIR:-$REPO_ROOT/runtime/state}"
@@ -7,6 +9,7 @@ LOG_DIR="${LOG_DIR:-$REPO_ROOT/logs}"
 MANIFEST_DIR="${MANIFEST_DIR:-$REPO_ROOT/manifest/openstack}"
 OPENRC_PATH_FILE="${OPENRC_PATH_FILE:-$REPO_ROOT/config/openrc.path}"
 PUBLISH_CONFIG_FILE="${PUBLISH_CONFIG_FILE:-$REPO_ROOT/config/publish.env}"
+
 mkdir -p "$STATE_DIR" "$LOG_DIR" "$MANIFEST_DIR"
 
 resolve_input_arg() {
@@ -43,16 +46,16 @@ RUN_ID="$(date +%Y%m%d%H%M%S)"
 TODAY_YYYYMMDD="$(date +%Y%m%d)"
 LOCAL_LOG="$LOG_DIR/10_publish_image_one_${RUN_ID}.log"
 : > "$LOCAL_LOG"
+
 log(){ printf '[%s] %s\n' "$(date '+%F %T')" "$*" | tee -a "$LOCAL_LOG" ; }
-die(){ log "ERROR: $*"; exit 1; }
-trap 'die "line=$LINENO cmd=$BASH_COMMAND"' ERR
+trap 'printf "[%s] ERROR: line=%s cmd=%s\n" "$(date "+%F %T")" "$LINENO" "$BASH_COMMAND" | tee -a "$LOCAL_LOG"; exit 1' ERR
 
 source "$CONFIG_FILE"
 VERSION="${VERSION:-unknown}"
 SERVER_ID="${SERVER_ID:-}"
 VOLUME_ID="${VOLUME_ID:-}"
 BASE_IMAGE_ID="${IMAGE_ID:-}"
-[[ -n "$SERVER_ID" && -n "$VOLUME_ID" && -n "$BASE_IMAGE_ID" ]] || die "SERVER_ID/VOLUME_ID/IMAGE_ID missing in $CONFIG_FILE"
+[[ -n "$SERVER_ID" && -n "$VOLUME_ID" && -n "$BASE_IMAGE_ID" ]] || { log "skip: missing SERVER_ID/VOLUME_ID/IMAGE_ID in $CONFIG_FILE"; exit 0; }
 
 server_exists(){ openstack server show "$SERVER_ID" >/dev/null 2>&1; }
 server_status(){ openstack server show "$SERVER_ID" -f value -c status 2>/dev/null || true; }
@@ -66,12 +69,18 @@ wait_for_volume_status() {
   local desired="$1" timeout_sec="$2" interval_sec="$3" st start now
   start="$(date +%s)"
   while true; do
-    volume_exists || die "volume disappeared while waiting for status=$desired id=$VOLUME_ID"
+    if ! volume_exists; then
+      log "skip: volume missing while waiting id=$VOLUME_ID"
+      return 1
+    fi
     st="$(volume_status)"
     [[ "$st" == "$desired" ]] && return 0
-    [[ "$st" == error* ]] && die "volume entered bad status=$st"
+    if [[ "$st" == error* ]]; then
+      log "skip: volume bad status=$st id=$VOLUME_ID"
+      return 1
+    fi
     now="$(date +%s)"
-    (( now - start >= timeout_sec )) && die "timeout waiting for volume status=$desired last_status=${st:-unknown}"
+    (( now - start >= timeout_sec )) && { log "skip: timeout waiting for volume status=$desired last_status=${st:-unknown}"; return 1; }
     sleep "$interval_sec"
   done
 }
@@ -82,9 +91,12 @@ wait_for_image_status() {
   while true; do
     st="$(image_status "$image_id")"
     [[ "$st" == "$desired" ]] && return 0
-    [[ "$st" == "killed" || "$st" == "deleted" || "$st" == "deactivated" ]] && die "image entered bad status=$st id=$image_id"
+    if [[ "$st" == "killed" || "$st" == "deleted" || "$st" == "deactivated" ]]; then
+      log "skip: image bad status=$st id=$image_id"
+      return 1
+    fi
     now="$(date +%s)"
-    (( now - start >= timeout_sec )) && die "timeout waiting for image id=$image_id status=$desired last_status=${st:-unknown}"
+    (( now - start >= timeout_sec )) && { log "skip: timeout waiting for image id=$image_id status=$desired last_status=${st:-unknown}"; return 1; }
     sleep "$interval_sec"
   done
 }
@@ -96,7 +108,6 @@ safe_set_visibility() {
     public) openstack image set --public "$image_id" || true ;;
     community) openstack image set --community "$image_id" || true ;;
     shared) openstack image set --shared "$image_id" || true ;;
-    *) die "invalid FINAL_IMAGE_VISIBILITY=$FINAL_IMAGE_VISIBILITY" ;;
   esac
 }
 
@@ -117,7 +128,7 @@ apply_metadata() {
 }
 
 write_manifest() {
-  local image_id="$1" image_name="$2" image_status_now="$3"
+  local image_id="$1" image_name="$2" image_status_now="$3" mode="$4"
   local manifest_file="$MANIFEST_DIR/final-image-${VERSION}.env"
   cat > "$manifest_file" <<EOF
 VERSION=$VERSION
@@ -129,6 +140,7 @@ FINAL_CONTAINER_FORMAT=$FINAL_CONTAINER_FORMAT
 SOURCE_SERVER_ID=$SERVER_ID
 SOURCE_VOLUME_ID=$VOLUME_ID
 SOURCE_BASE_IMAGE_ID=$BASE_IMAGE_ID
+PUBLISH_MODE=$mode
 PUBLISHED_AT=$RUN_ID
 EOF
   cp -f "$manifest_file" "$STATE_DIR/current.final-image-${VERSION}.env"
@@ -139,11 +151,11 @@ EOF
 cleanup_sources() {
   if [[ "$DELETE_VOLUME_AFTER_PUBLISH" == "yes" ]] && volume_exists; then
     log "deleting volume id=$VOLUME_ID"
-    openstack volume delete "$VOLUME_ID"
+    openstack volume delete "$VOLUME_ID" || true
   fi
   if [[ "$DELETE_BASE_IMAGE_AFTER_PUBLISH" == "yes" ]] && image_exists "$BASE_IMAGE_ID"; then
     log "deleting base image id=$BASE_IMAGE_ID"
-    openstack image delete "$BASE_IMAGE_ID"
+    openstack image delete "$BASE_IMAGE_ID" || true
   fi
 }
 
@@ -157,62 +169,63 @@ log "source state: final_image=${final_image_id_existing:-none} server=$server_p
 
 if [[ -n "$final_image_id_existing" ]]; then
   final_status_existing="$(image_status "$final_image_id_existing")"
-  case "$ON_FINAL_EXISTS" in
-    error) die "final image already exists: $final_image_name id=$final_image_id_existing status=$final_status_existing" ;;
-    recover)
-      if [[ "$final_status_existing" == "active" ]]; then
-        log "final image already exists and is active -> recover success: $final_image_name id=$final_image_id_existing"
-        apply_metadata "$final_image_id_existing"
-        manifest_file="$(write_manifest "$final_image_id_existing" "$final_image_name" "$final_status_existing")"
-        cleanup_sources
-        log "DONE"; log "VERSION=$VERSION"; log "FINAL_IMAGE_NAME=$final_image_name"; log "FINAL_IMAGE_ID=$final_image_id_existing"; log "MANIFEST_FILE=$manifest_file"
-        exit 0
-      elif [[ "$final_status_existing" == "queued" || "$final_status_existing" == "saving" || "$final_status_existing" == "importing" ]]; then
-        log "final image already exists and is still progressing -> waiting id=$final_image_id_existing status=$final_status_existing"
-        wait_for_image_status "$final_image_id_existing" active "$WAIT_FINAL_TIMEOUT_SECONDS" "$WAIT_FINAL_INTERVAL_SECONDS"
-        final_status_existing="$(image_status "$final_image_id_existing")"
-        apply_metadata "$final_image_id_existing"
-        manifest_file="$(write_manifest "$final_image_id_existing" "$final_image_name" "$final_status_existing")"
-        cleanup_sources
-        log "DONE"; log "VERSION=$VERSION"; log "FINAL_IMAGE_NAME=$final_image_name"; log "FINAL_IMAGE_ID=$final_image_id_existing"; log "MANIFEST_FILE=$manifest_file"
-        exit 0
-      else
-        die "final image exists in non-recoverable status: $final_image_name id=$final_image_id_existing status=$final_status_existing"
-      fi
-      ;;
-    replace)
-      log "deleting existing final image first: $final_image_name id=$final_image_id_existing"
-      openstack image delete "$final_image_id_existing"
-      ;;
-    *)
-      die "invalid ON_FINAL_EXISTS=$ON_FINAL_EXISTS"
-      ;;
-  esac
+  if [[ "$ON_FINAL_EXISTS" == "recover" && "$final_status_existing" == "active" ]]; then
+    log "final image already exists and is active -> recover success: $final_image_name id=$final_image_id_existing"
+    apply_metadata "$final_image_id_existing"
+    manifest_file="$(write_manifest "$final_image_id_existing" "$final_image_name" "$final_status_existing" "recover")"
+    cleanup_sources
+    log "DONE"; log "VERSION=$VERSION"; log "FINAL_IMAGE_NAME=$final_image_name"; log "FINAL_IMAGE_ID=$final_image_id_existing"; log "MANIFEST_FILE=$manifest_file"
+    exit 0
+  fi
+  if [[ "$ON_FINAL_EXISTS" == "recover" && ( "$final_status_existing" == "queued" || "$final_status_existing" == "saving" || "$final_status_existing" == "importing" ) ]]; then
+    log "final image already exists and is still progressing -> waiting id=$final_image_id_existing status=$final_status_existing"
+    if wait_for_image_status "$final_image_id_existing" active "$WAIT_FINAL_TIMEOUT_SECONDS" "$WAIT_FINAL_INTERVAL_SECONDS"; then
+      final_status_existing="$(image_status "$final_image_id_existing")"
+      apply_metadata "$final_image_id_existing"
+      manifest_file="$(write_manifest "$final_image_id_existing" "$final_image_name" "$final_status_existing" "recover-wait")"
+      cleanup_sources
+      log "DONE"; log "VERSION=$VERSION"; log "FINAL_IMAGE_NAME=$final_image_name"; log "FINAL_IMAGE_ID=$final_image_id_existing"; log "MANIFEST_FILE=$manifest_file"
+      exit 0
+    fi
+    log "skip: existing final image did not become active for version $VERSION"
+    exit 0
+  fi
+  if [[ "$ON_FINAL_EXISTS" == "replace" ]]; then
+    log "deleting existing final image first: $final_image_name id=$final_image_id_existing"
+    openstack image delete "$final_image_id_existing" || true
+  else
+    log "skip: final image exists in status=$final_status_existing name=$final_image_name"
+    exit 0
+  fi
 fi
 
 if [[ "$server_present" == no && "$volume_present" == no ]]; then
-  die "no publish source left for version $VERSION: server missing, volume missing, final image missing"
+  log "skip: no publish source left for version $VERSION (server missing, volume missing, final image missing)"
+  exit 0
 fi
 
 if [[ "$server_present" == yes && "$DELETE_SERVER_BEFORE_PUBLISH" == yes ]]; then
   pre_server_status="$(server_status)"
   log "deleting server before publish id=$SERVER_ID status=$pre_server_status"
-  openstack server delete "$SERVER_ID"
+  openstack server delete "$SERVER_ID" || true
   log "waiting for boot volume to become available"
-  wait_for_volume_status available 600 5
+  wait_for_volume_status available 600 5 || { log "skip: volume not ready after server delete for version $VERSION"; exit 0; }
 elif [[ "$server_present" == no && "$volume_present" == yes ]]; then
   log "server already absent, volume still present -> continue publish from volume"
-  wait_for_volume_status available 600 5
+  wait_for_volume_status available 600 5 || { log "skip: volume not available for version $VERSION"; exit 0; }
 elif [[ "$server_present" == yes && "$DELETE_SERVER_BEFORE_PUBLISH" != yes ]]; then
   pre_server_status="$(server_status)"
   log "server status before publish=$pre_server_status"
-  [[ "$pre_server_status" == SHUTOFF ]] || die "server must be SHUTOFF before publish when DELETE_SERVER_BEFORE_PUBLISH=no"
+  [[ "$pre_server_status" == SHUTOFF ]] || { log "skip: server not SHUTOFF for version $VERSION"; exit 0; }
 fi
 
-volume_exists || die "volume missing before upload-to-image"
+if ! volume_exists; then
+  log "skip: volume missing before upload-to-image for version $VERSION"
+  exit 0
+fi
 
 log "uploading volume to image as $FINAL_DISK_FORMAT from volume_id=$VOLUME_ID name=$final_image_name"
-openstack volume upload-to-image --disk-format "$FINAL_DISK_FORMAT" --container-format "$FINAL_CONTAINER_FORMAT" --image-name "$final_image_name" "$VOLUME_ID" >/dev/null
+openstack volume upload-to-image --disk-format "$FINAL_DISK_FORMAT" --container-format "$FINAL_CONTAINER_FORMAT" --image-name "$final_image_name" "$VOLUME_ID" >/dev/null || { log "skip: upload-to-image command failed for version $VERSION"; exit 0; }
 
 start_ts="$(date +%s)"
 final_image_id=""
@@ -220,18 +233,25 @@ while true; do
   final_image_id="$(find_final_image_id_by_name "$final_image_name")"
   [[ -n "$final_image_id" ]] && break
   now_ts="$(date +%s)"
-  (( now_ts - start_ts >= 600 )) && die "timeout waiting for image id by final name=$final_image_name"
+  if (( now_ts - start_ts >= 600 )); then
+    log "skip: timeout waiting for image id by final name=$final_image_name"
+    exit 0
+  fi
   sleep 5
 done
 
 if [[ "$WAIT_FOR_FINAL_ACTIVE" == "yes" ]]; then
   log "waiting for final image to become active id=$final_image_id"
-  wait_for_image_status "$final_image_id" active "$WAIT_FINAL_TIMEOUT_SECONDS" "$WAIT_FINAL_INTERVAL_SECONDS"
+  wait_for_image_status "$final_image_id" active "$WAIT_FINAL_TIMEOUT_SECONDS" "$WAIT_FINAL_INTERVAL_SECONDS" || { log "skip: final image did not become active for version $VERSION"; exit 0; }
 fi
 
 final_image_status="$(image_status "$final_image_id")"
-[[ "$final_image_status" == active ]] || die "final image not active: id=$final_image_id status=$final_image_status"
+if [[ "$final_image_status" != active ]]; then
+  log "skip: final image not active for version $VERSION id=$final_image_id status=$final_image_status"
+  exit 0
+fi
+
 apply_metadata "$final_image_id"
-manifest_file="$(write_manifest "$final_image_id" "$final_image_name" "$final_image_status")"
+manifest_file="$(write_manifest "$final_image_id" "$final_image_name" "$final_image_status" "publish")"
 cleanup_sources
 log "DONE"; log "VERSION=$VERSION"; log "FINAL_IMAGE_NAME=$final_image_name"; log "FINAL_IMAGE_ID=$final_image_id"; log "MANIFEST_FILE=$manifest_file"

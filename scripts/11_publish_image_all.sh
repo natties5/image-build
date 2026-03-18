@@ -1,3 +1,4 @@
+\
 #!/usr/bin/env bash
 set -Eeuo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -16,7 +17,10 @@ mapfile -t versions < <(awk -F '\t' 'NR>1 && $1 != "" {print $1}' "$SUMMARY_FILE
 log "versions selected: ${versions[*]}"
 for version in "${versions[@]}"; do
   log "publish start version=$version"
-  "$SCRIPT_DIR/10_publish_image_one.sh" "$version"
-  log "publish done version=$version"
+  if "$SCRIPT_DIR/10_publish_image_one.sh" "$version"; then
+    log "publish done version=$version"
+  else
+    log "publish returned non-zero version=$version"
+  fi
 done
 log "all publish completed"
