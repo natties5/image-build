@@ -1,4 +1,3 @@
-\
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
@@ -24,8 +23,13 @@ resolve_input_arg() {
 CONFIG_FILE="$(resolve_input_arg "${1:-}")"
 [[ -n "$CONFIG_FILE" && -f "$CONFIG_FILE" ]] || { echo "usage: $0 <ubuntu-version | path-to-.configure.env>" >&2; exit 1; }
 
+[[ -f "$OPENRC_PATH_FILE" ]] || { echo "missing config: $OPENRC_PATH_FILE" >&2; exit 1; }
+# shellcheck disable=SC1090
 source "$OPENRC_PATH_FILE"
+[[ -n "${OPENRC_FILE:-}" && -f "$OPENRC_FILE" ]] || { echo "OPENRC_FILE invalid" >&2; exit 1; }
+# shellcheck disable=SC1090
 source "$OPENRC_FILE"
+
 [[ -f "$PUBLISH_CONFIG_FILE" ]] && source "$PUBLISH_CONFIG_FILE"
 
 FINAL_IMAGE_VISIBILITY="${FINAL_IMAGE_VISIBILITY:-private}"
@@ -41,6 +45,7 @@ SET_OS_DISTRO_PROPERTY="${SET_OS_DISTRO_PROPERTY:-yes}"
 SET_OS_VERSION_PROPERTY="${SET_OS_VERSION_PROPERTY:-yes}"
 FINAL_DISK_FORMAT="${FINAL_DISK_FORMAT:-qcow2}"
 FINAL_CONTAINER_FORMAT="${FINAL_CONTAINER_FORMAT:-bare}"
+CINDER_UPLOAD_FORCE="${CINDER_UPLOAD_FORCE:-True}"
 
 RUN_ID="$(date +%Y%m%d%H%M%S)"
 TODAY_YYYYMMDD="$(date +%Y%m%d)"
@@ -50,6 +55,10 @@ LOCAL_LOG="$LOG_DIR/10_publish_image_one_${RUN_ID}.log"
 log(){ printf '[%s] %s\n' "$(date '+%F %T')" "$*" | tee -a "$LOCAL_LOG" ; }
 trap 'printf "[%s] ERROR: line=%s cmd=%s\n" "$(date "+%F %T")" "$LINENO" "$BASH_COMMAND" | tee -a "$LOCAL_LOG"; exit 1' ERR
 
+for c in openstack cinder awk grep sed head; do command -v "$c" >/dev/null 2>&1 || { echo "missing command: $c" >&2; exit 1; }; done
+openstack token issue >/dev/null
+
+# shellcheck disable=SC1090
 source "$CONFIG_FILE"
 VERSION="${VERSION:-unknown}"
 SERVER_ID="${SERVER_ID:-}"
@@ -69,16 +78,10 @@ wait_for_volume_status() {
   local desired="$1" timeout_sec="$2" interval_sec="$3" st start now
   start="$(date +%s)"
   while true; do
-    if ! volume_exists; then
-      log "skip: volume missing while waiting id=$VOLUME_ID"
-      return 1
-    fi
+    if ! volume_exists; then log "skip: volume disappeared while waiting id=$VOLUME_ID"; return 1; fi
     st="$(volume_status)"
     [[ "$st" == "$desired" ]] && return 0
-    if [[ "$st" == error* ]]; then
-      log "skip: volume bad status=$st id=$VOLUME_ID"
-      return 1
-    fi
+    [[ "$st" == error* ]] && { log "skip: volume bad status=$st id=$VOLUME_ID"; return 1; }
     now="$(date +%s)"
     (( now - start >= timeout_sec )) && { log "skip: timeout waiting for volume status=$desired last_status=${st:-unknown}"; return 1; }
     sleep "$interval_sec"
@@ -220,25 +223,32 @@ elif [[ "$server_present" == yes && "$DELETE_SERVER_BEFORE_PUBLISH" != yes ]]; t
 fi
 
 if ! volume_exists; then
-  log "skip: volume missing before upload-to-image for version $VERSION"
+  log "skip: volume missing before cinder upload-to-image for version $VERSION"
   exit 0
 fi
 
-log "uploading volume to image as $FINAL_DISK_FORMAT from volume_id=$VOLUME_ID name=$final_image_name"
-openstack volume upload-to-image --disk-format "$FINAL_DISK_FORMAT" --container-format "$FINAL_CONTAINER_FORMAT" --image-name "$final_image_name" "$VOLUME_ID" >/dev/null || { log "skip: upload-to-image command failed for version $VERSION"; exit 0; }
+log "uploading volume to image via cinder as $FINAL_DISK_FORMAT from volume_id=$VOLUME_ID name=$final_image_name"
+upload_output="$(cinder upload-to-image --disk-format "$FINAL_DISK_FORMAT" --container-format "$FINAL_CONTAINER_FORMAT" --force "$CINDER_UPLOAD_FORCE" "$VOLUME_ID" "$final_image_name" 2>&1)" || {
+  log "skip: cinder upload-to-image failed for version $VERSION"
+  printf '%s\n' "$upload_output" | tee -a "$LOCAL_LOG"
+  exit 0
+}
+printf '%s\n' "$upload_output" | tee -a "$LOCAL_LOG"
 
-start_ts="$(date +%s)"
-final_image_id=""
-while true; do
-  final_image_id="$(find_final_image_id_by_name "$final_image_name")"
-  [[ -n "$final_image_id" ]] && break
-  now_ts="$(date +%s)"
-  if (( now_ts - start_ts >= 600 )); then
-    log "skip: timeout waiting for image id by final name=$final_image_name"
-    exit 0
-  fi
-  sleep 5
-done
+final_image_id="$(awk -F'|' '/image_id/ {gsub(/ /,"",$3); print $3}' <<<"$upload_output" | head -n1 || true)"
+if [[ -z "$final_image_id" ]]; then
+  start_ts="$(date +%s)"
+  while true; do
+    final_image_id="$(find_final_image_id_by_name "$final_image_name")"
+    [[ -n "$final_image_id" ]] && break
+    now_ts="$(date +%s)"
+    if (( now_ts - start_ts >= 600 )); then
+      log "skip: timeout waiting for image id by final name=$final_image_name"
+      exit 0
+    fi
+    sleep 5
+  done
+fi
 
 if [[ "$WAIT_FOR_FINAL_ACTIVE" == "yes" ]]; then
   log "waiting for final image to become active id=$final_image_id"
