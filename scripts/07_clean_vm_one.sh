@@ -187,8 +187,10 @@ log "REMOTE_LOG=$REMOTE_LOG"
 wait_ssh
 
 log "run final clean"
+REMOTE_RUN_LOG="$(mktemp "$LOG_DIR/final_clean_remote_stdout_${VM_HOST}_${RUN_ID}.XXXXXX.log")"
+set +e
 ssh_run \
-  "REMOTE_LOG_PATH='$REMOTE_LOG' BUILD_USER_HOME='$BUILD_USER_HOME' POWEROFF_WHEN_DONE='$POWEROFF_WHEN_DONE' bash -s" <<'REMOTE_EOF' | tee -a "$LOCAL_LOG"
+  "REMOTE_LOG_PATH='$REMOTE_LOG' BUILD_USER_HOME='$BUILD_USER_HOME' POWEROFF_WHEN_DONE='$POWEROFF_WHEN_DONE' bash -s" <<'REMOTE_EOF' | tee -a "$LOCAL_LOG" | tee "$REMOTE_RUN_LOG"
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
@@ -289,6 +291,21 @@ if [[ "$POWEROFF_WHEN_DONE" == "yes" ]]; then
   poweroff
 fi
 REMOTE_EOF
+remote_ec=$?
+set -e
+
+if [[ "$remote_ec" -ne 0 ]]; then
+  if [[ "$POWEROFF_WHEN_DONE" == "yes" && "$remote_ec" == "255" ]]; then
+    if grep -q 'final clean done' "$REMOTE_RUN_LOG" && grep -q 'poweroff' "$REMOTE_RUN_LOG"; then
+      log "remote SSH closed after poweroff; treating exit_code=255 as success"
+    else
+      log "remote session ended with exit_code=$remote_ec but clean completion markers were not both found"
+      exit "$remote_ec"
+    fi
+  else
+    exit "$remote_ec"
+  fi
+fi
 
 write_summary
 log "DONE"
