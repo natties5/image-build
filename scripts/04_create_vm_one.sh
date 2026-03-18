@@ -9,30 +9,16 @@ GUEST_ENV_FILE="${GUEST_ENV_FILE:-$REPO_ROOT/config/guest.env}"
 OPENRC_PATH_FILE="${OPENRC_PATH_FILE:-$REPO_ROOT/config/openrc.path}"
 
 [[ -f "$OPENSTACK_ENV_FILE" ]] || { echo "missing config: $OPENSTACK_ENV_FILE" >&2; exit 1; }
-# shellcheck disable=SC1090
 source "$OPENSTACK_ENV_FILE"
-
 [[ -f "$GUEST_ENV_FILE" ]] || { echo "missing config: $GUEST_ENV_FILE" >&2; exit 1; }
-# shellcheck disable=SC1090
 source "$GUEST_ENV_FILE"
-
 [[ -f "$OPENRC_PATH_FILE" ]] || { echo "missing config: $OPENRC_PATH_FILE" >&2; exit 1; }
-# shellcheck disable=SC1090
 source "$OPENRC_PATH_FILE"
 
 VERSION="${1:-}"
-if [[ -z "$VERSION" ]]; then
-  echo "usage: $0 <ubuntu-version>" >&2
-  echo "example: $0 24.04" >&2
-  exit 1
-fi
+[[ -n "$VERSION" ]] || { echo "usage: $0 <ubuntu-version>" >&2; exit 1; }
 
-PIPELINE_ROOT="${PIPELINE_ROOT:-}"
-if [[ -z "$PIPELINE_ROOT" ]]; then
-  PIPELINE_ROOT="$REPO_ROOT"
-fi
-
-SUMMARY_FILE="${SUMMARY_FILE:-$PIPELINE_ROOT/manifest/ubuntu/ubuntu-auto-discover-summary.tsv}"
+PIPELINE_ROOT="${PIPELINE_ROOT:-$REPO_ROOT}"
 OPENSTACK_MANIFEST_DIR="${OPENSTACK_MANIFEST_DIR:-$PIPELINE_ROOT/manifest/openstack}"
 STATE_DIR="${STATE_DIR:-$PIPELINE_ROOT/runtime/state}"
 LOG_DIR="${LOG_DIR:-$PIPELINE_ROOT/logs}"
@@ -57,62 +43,37 @@ VM_NAME_TEMPLATE="${VM_NAME_TEMPLATE:-ubuntu-{version}-ci-{ts}}"
 VOLUME_NAME_TEMPLATE="${VOLUME_NAME_TEMPLATE:-{vm_name}-boot}"
 
 mkdir -p "$STATE_DIR" "$LOG_DIR" "$OUTPUT_DIR"
-
 LOG_FILE="$LOG_DIR/04_create_vm_one.log"
 
-log() {
-  printf '[%s] %s\n' "$(date '+%F %T')" "$*" | tee -a "$LOG_FILE"
-}
-
-die() {
-  log "ERROR: $*"
-  exit 1
-}
-
-need_cmd() {
-  command -v "$1" >/dev/null 2>&1 || die "missing command: $1"
-}
-
-shell_escape() {
-  printf '%q' "$1"
-}
-
+log(){ printf '[%s] %s\n' "$(date '+%F %T')" "$*" | tee -a "$LOG_FILE" ; }
+die(){ log "ERROR: $*"; exit 1; }
 trap 'die "line=$LINENO cmd=$BASH_COMMAND"' ERR
 
-need_cmd openstack
-need_cmd awk
-need_cmd sed
-need_cmd mktemp
-need_cmd mkdir
-need_cmd head
+need_cmd(){ command -v "$1" >/dev/null 2>&1 || die "missing command: $1"; }
+for c in openstack awk sed mktemp head grep; do need_cmd "$c"; done
 
-[[ -n "${OPENRC_FILE:-}" ]] || die "OPENRC_FILE is empty in $OPENRC_PATH_FILE"
-[[ -f "$OPENRC_FILE" ]] || die "OPENRC_FILE not found: $OPENRC_FILE"
-[[ -n "$NETWORK_ID" ]] || die "NETWORK_ID is empty"
-[[ -n "$FLAVOR_ID" ]] || die "FLAVOR_ID is empty"
-[[ -n "$VOLUME_TYPE" ]] || die "VOLUME_TYPE is empty"
-[[ -n "$VOLUME_SIZE_GB" ]] || die "VOLUME_SIZE_GB is empty"
-[[ -n "$SECURITY_GROUP" ]] || die "SECURITY_GROUP is empty"
+[[ -n "${OPENRC_FILE:-}" && -f "$OPENRC_FILE" ]] || die "OPENRC_FILE invalid"
+[[ -n "$NETWORK_ID" && -n "$FLAVOR_ID" && -n "$VOLUME_TYPE" && -n "$VOLUME_SIZE_GB" && -n "$SECURITY_GROUP" ]] || die "required openstack config missing"
 [[ -n "$ROOT_PASSWORD" ]] || die "ROOT_PASSWORD is empty"
 
-# shellcheck disable=SC1090
 source "$OPENRC_FILE"
-log "checking OpenStack auth"
 openstack token issue >/dev/null
 
 manifest_file="$OPENSTACK_MANIFEST_DIR/base-image-${VERSION}.env"
 [[ -f "$manifest_file" ]] || die "base image manifest not found: $manifest_file"
-
-# shellcheck disable=SC1090
 source "$manifest_file"
 
 IMAGE_ID="${BASE_IMAGE_ID:-}"
 IMAGE_NAME="${BASE_IMAGE_NAME:-}"
-[[ -n "$IMAGE_ID" ]] || die "BASE_IMAGE_ID is empty in $manifest_file"
-[[ -n "$IMAGE_NAME" ]] || die "BASE_IMAGE_NAME is empty in $manifest_file"
-
-log "checking source image id=$IMAGE_ID name=$IMAGE_NAME"
+[[ -n "$IMAGE_ID" && -n "$IMAGE_NAME" ]] || die "BASE_IMAGE_ID/BASE_IMAGE_NAME missing in $manifest_file"
 openstack image show "$IMAGE_ID" >/dev/null
+
+extract_first_ipv4() {
+  local s="${1:-}"
+  local out
+  out="$(grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' <<<"$s" | head -n1 || true)"
+  printf '%s' "$out"
+}
 
 ts="$(date +%Y%m%d%H%M%S)"
 version_slug="${VERSION//./-}"
@@ -121,12 +82,8 @@ VM_NAME="${VM_NAME//\{ts\}/$ts}"
 VOLUME_NAME="${VOLUME_NAME_TEMPLATE//\{vm_name\}/$VM_NAME}"
 OUTPUT_PREFIX="$VM_NAME"
 
-if openstack server show "$VM_NAME" >/dev/null 2>&1; then
-  die "server already exists: $VM_NAME"
-fi
-if openstack volume show "$VOLUME_NAME" >/dev/null 2>&1; then
-  die "volume already exists: $VOLUME_NAME"
-fi
+openstack server show "$VM_NAME" >/dev/null 2>&1 && die "server already exists: $VM_NAME"
+openstack volume show "$VOLUME_NAME" >/dev/null 2>&1 && die "volume already exists: $VOLUME_NAME"
 
 OUTPUT_ENV_FILE="$OUTPUT_DIR/${OUTPUT_PREFIX}.env"
 OUTPUT_TXT_FILE="$OUTPUT_DIR/${OUTPUT_PREFIX}.txt"
@@ -162,12 +119,7 @@ trap 'rm -f "$USER_DATA_FILE"' EXIT
 } > "$USER_DATA_FILE"
 
 log "creating boot volume: $VOLUME_NAME from image_id=$IMAGE_ID"
-VOLUME_ID="$(openstack volume create \
-  --image "$IMAGE_ID" \
-  --size "$VOLUME_SIZE_GB" \
-  --type "$VOLUME_TYPE" \
-  -f value -c id \
-  "$VOLUME_NAME")"
+VOLUME_ID="$(openstack volume create --image "$IMAGE_ID" --size "$VOLUME_SIZE_GB" --type "$VOLUME_TYPE" -f value -c id "$VOLUME_NAME")"
 [[ -n "$VOLUME_ID" ]] || die "failed to create volume"
 
 log "waiting for volume to become available"
@@ -178,27 +130,14 @@ while true; do
     available) break ;;
     error|error_restoring|error_extending|error_managing) die "volume entered bad state: $vol_status" ;;
   esac
-  if (( $(date +%s) >= end_ts )); then
-    die "timeout waiting for volume; last status=$vol_status"
-  fi
+  (( $(date +%s) >= end_ts )) && die "timeout waiting for volume; last status=$vol_status"
   sleep 5
 done
 
 log "creating server: $VM_NAME"
-server_create_cmd=(
-  openstack server create
-  --flavor "$FLAVOR_ID"
-  --network "$NETWORK_ID"
-  --security-group "$SECURITY_GROUP"
-  --volume "$VOLUME_ID"
-  --user-data "$USER_DATA_FILE"
-  -f value -c id
-)
-if [[ -n "$KEY_NAME" ]]; then
-  server_create_cmd+=( --key-name "$KEY_NAME" )
-fi
+server_create_cmd=(openstack server create --flavor "$FLAVOR_ID" --network "$NETWORK_ID" --security-group "$SECURITY_GROUP" --volume "$VOLUME_ID" --user-data "$USER_DATA_FILE" -f value -c id)
+[[ -n "$KEY_NAME" ]] && server_create_cmd+=( --key-name "$KEY_NAME" )
 server_create_cmd+=( "$VM_NAME" )
-
 SERVER_ID="$("${server_create_cmd[@]}")"
 [[ -n "$SERVER_ID" ]] || die "failed to create server"
 
@@ -210,13 +149,12 @@ while true; do
     ACTIVE) break ;;
     ERROR) die "server entered ERROR state" ;;
   esac
-  if (( $(date +%s) >= end_ts )); then
-    die "timeout waiting for server; last status=$srv_status"
-  fi
+  (( $(date +%s) >= end_ts )) && die "timeout waiting for server; last status=$srv_status"
   sleep 5
 done
 
-FIXED_IP="$(openstack server show "$SERVER_ID" -f value -c addresses | sed -E 's/.*=([0-9.]+).*/\1/' | head -n1)"
+addresses_raw="$(openstack server show "$SERVER_ID" -f value -c addresses)"
+FIXED_IP="$(extract_first_ipv4 "$addresses_raw")"
 FLOATING_IP=""
 
 if [[ -n "$EXISTING_FLOATING_IP" ]]; then
@@ -227,18 +165,17 @@ elif [[ -n "$FLOATING_NETWORK" ]]; then
   log "creating floating IP from network: $FLOATING_NETWORK"
   FLOATING_IP="$(openstack floating ip create "$FLOATING_NETWORK" -f value -c floating_ip_address)"
   [[ -n "$FLOATING_IP" ]] || die "failed to allocate floating IP"
-  log "associating floating IP: $FLOATING_IP"
   openstack server add floating ip "$SERVER_ID" "$FLOATING_IP"
 fi
 
 LOGIN_IP="$FIXED_IP"
-if [[ -n "$FLOATING_IP" ]]; then
-  LOGIN_IP="$FLOATING_IP"
-fi
+[[ -n "$FLOATING_IP" ]] && LOGIN_IP="$FLOATING_IP"
+[[ -n "$LOGIN_IP" ]] || die "could not extract login ip from addresses: $addresses_raw"
 
 SSH_COMMAND="ssh -o StrictHostKeyChecking=no -p $SSH_PORT $ROOT_USER@$LOGIN_IP"
 
-log "writing output files"
+shell_escape(){ printf '%q' "$1"; }
+
 cat > "$OUTPUT_ENV_FILE" <<EOF_ENV
 VERSION=$(shell_escape "$VERSION")
 VM_NAME=$(shell_escape "$VM_NAME")
@@ -247,11 +184,16 @@ VOLUME_NAME=$(shell_escape "$VOLUME_NAME")
 VOLUME_ID=$(shell_escape "$VOLUME_ID")
 IMAGE_ID=$(shell_escape "$IMAGE_ID")
 IMAGE_NAME=$(shell_escape "$IMAGE_NAME")
+ADDRESSES_RAW=$(shell_escape "$addresses_raw")
 FIXED_IP=$(shell_escape "$FIXED_IP")
 FLOATING_IP=$(shell_escape "$FLOATING_IP")
 LOGIN_IP=$(shell_escape "$LOGIN_IP")
+VM_HOST=$(shell_escape "$LOGIN_IP")
 LOGIN_USER=$(shell_escape "$ROOT_USER")
+SSH_USER=$(shell_escape "$ROOT_USER")
 LOGIN_PASSWORD=$(shell_escape "$ROOT_PASSWORD")
+SSH_PASSWORD=$(shell_escape "$ROOT_PASSWORD")
+ROOT_PASSWORD=$(shell_escape "$ROOT_PASSWORD")
 SSH_PORT=$(shell_escape "$SSH_PORT")
 SSH_COMMAND=$(shell_escape "$SSH_COMMAND")
 OUTPUT_TXT_FILE=$(shell_escape "$OUTPUT_TXT_FILE")
@@ -261,6 +203,7 @@ EOF_ENV
 cat > "$OUTPUT_CONFIGURE_ENV_FILE" <<EOF_CFG
 VERSION=$(shell_escape "$VERSION")
 VM_HOST=$(shell_escape "$LOGIN_IP")
+LOGIN_IP=$(shell_escape "$LOGIN_IP")
 SSH_PORT=$(shell_escape "$SSH_PORT")
 SSH_USER=$(shell_escape "$ROOT_USER")
 SSH_PRIVATE_KEY=''
@@ -282,6 +225,7 @@ VOLUME_NAME=$VOLUME_NAME
 VOLUME_ID=$VOLUME_ID
 IMAGE_ID=$IMAGE_ID
 IMAGE_NAME=$IMAGE_NAME
+ADDRESSES_RAW=$addresses_raw
 FIXED_IP=$FIXED_IP
 FLOATING_IP=${FLOATING_IP:-}
 LOGIN_IP=$LOGIN_IP
@@ -308,6 +252,7 @@ VOLUME_NAME=$VOLUME_NAME
 VOLUME_ID=$VOLUME_ID
 IMAGE_ID=$IMAGE_ID
 IMAGE_NAME=$IMAGE_NAME
+ADDRESSES_RAW=$addresses_raw
 FIXED_IP=$FIXED_IP
 FLOATING_IP=${FLOATING_IP:-}
 LOGIN_IP=$LOGIN_IP

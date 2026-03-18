@@ -3,7 +3,6 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
-
 STATE_DIR="${STATE_DIR:-$REPO_ROOT/runtime/state}"
 LOG_DIR="${LOG_DIR:-$REPO_ROOT/logs}"
 CLEAN_STATE_DIR="${CLEAN_STATE_DIR:-$STATE_DIR/clean}"
@@ -14,100 +13,71 @@ mkdir -p "$STATE_DIR" "$LOG_DIR" "$CLEAN_STATE_DIR"
 
 resolve_input_arg() {
   local arg="${1:-}"
-  if [[ -n "$arg" && -f "$arg" ]]; then
-    printf '%s' "$arg"
-    return 0
-  fi
-  if [[ -n "$arg" && -f "$STATE_DIR/current.configure-${arg}.env" ]]; then
-    printf '%s' "$STATE_DIR/current.configure-${arg}.env"
-    return 0
-  fi
-  if [[ -n "$arg" && -f "$STATE_DIR/${arg}.configure.env" ]]; then
-    printf '%s' "$STATE_DIR/${arg}.configure.env"
-    return 0
-  fi
-  if [[ -f "$STATE_DIR/current.configure.env" ]]; then
-    printf '%s' "$STATE_DIR/current.configure.env"
-    return 0
-  fi
+  if [[ -n "$arg" && -f "$arg" ]]; then printf '%s' "$arg"; return 0; fi
+  if [[ -n "$arg" && -f "$STATE_DIR/current.configure-${arg}.env" ]]; then printf '%s' "$STATE_DIR/current.configure-${arg}.env"; return 0; fi
+  if [[ -n "$arg" && -f "$STATE_DIR/${arg}.configure.env" ]]; then printf '%s' "$STATE_DIR/${arg}.configure.env"; return 0; fi
+  if [[ -f "$STATE_DIR/current.configure.env" ]]; then printf '%s' "$STATE_DIR/current.configure.env"; return 0; fi
   printf ''
 }
 
 CONFIG_ARG_RAW="${1:-}"
 CONFIG_FILE="$(resolve_input_arg "$CONFIG_ARG_RAW")"
-
 RUN_ID="$(date +%Y%m%d%H%M%S)"
 LOCAL_LOG=""
 SUMMARY_FILE=""
 REMOTE_LOG=""
 REMOTE_RUN_LOG=""
 
-LOG() {
-  printf '[%s] %s\n' "$(date '+%F %T')" "$*" | tee -a "$LOCAL_LOG"
-}
-
-DIE() {
-  LOG "ERROR: $*"
-  exit 1
-}
-
-on_err() {
-  local ec=$?
-  LOG "ERROR exit_code=$ec line=${BASH_LINENO[0]} cmd=${BASH_COMMAND}"
-  exit "$ec"
-}
+LOG(){ printf '[%s] %s\n' "$(date '+%F %T')" "$*" | tee -a "$LOCAL_LOG" ; }
+DIE(){ LOG "ERROR: $*"; exit 1; }
+on_err(){ local ec=$?; LOG "ERROR exit_code=$ec line=${BASH_LINENO[0]} cmd=${BASH_COMMAND}"; exit "$ec"; }
 trap on_err ERR
 
-need_cmd() {
-  command -v "$1" >/dev/null 2>&1 || DIE "missing command: $1"
-}
+need_cmd(){ command -v "$1" >/dev/null 2>&1 || DIE "missing command: $1"; }
+for c in ssh sshpass openstack awk sed grep timeout; do need_cmd "$c"; done
 
-need_cmd ssh
-need_cmd sshpass
-need_cmd scp
-need_cmd openstack
-need_cmd awk
-need_cmd sed
-need_cmd grep
-need_cmd timeout
-
-[[ -n "$CONFIG_FILE" ]] || { echo "usage: $0 <ubuntu-version | path-to-.configure.env>" >&2; exit 1; }
-[[ -f "$CONFIG_FILE" ]] || DIE "config file not found: $CONFIG_FILE"
+[[ -n "$CONFIG_FILE" && -f "$CONFIG_FILE" ]] || { echo "usage: $0 <ubuntu-version | path-to-.configure.env>" >&2; exit 1; }
 [[ -f "$OPENRC_PATH_FILE" ]] || DIE "missing config: $OPENRC_PATH_FILE"
-
-# shellcheck disable=SC1090
 source "$OPENRC_PATH_FILE"
-[[ -n "${OPENRC_FILE:-}" ]] || DIE "OPENRC_FILE is empty in $OPENRC_PATH_FILE"
-[[ -f "$OPENRC_FILE" ]] || DIE "openrc file not found: $OPENRC_FILE"
-# shellcheck disable=SC1090
+[[ -n "${OPENRC_FILE:-}" && -f "$OPENRC_FILE" ]] || DIE "OPENRC_FILE invalid"
 source "$OPENRC_FILE"
 
 if [[ -f "$CLEAN_CONFIG_FILE" ]]; then
   set -a
-  # shellcheck disable=SC1090
   source "$CLEAN_CONFIG_FILE"
   set +a
 fi
-
 POWEROFF_WHEN_DONE="${POWEROFF_WHEN_DONE:-yes}"
 BUILD_USER_HOME="${BUILD_USER_HOME:-}"
 
+extract_first_ipv4() {
+  local s="${1:-}"
+  grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' <<<"$s" | head -n1 || true
+}
+
 load_config_file() {
-  # shellcheck disable=SC1090
   source "$1"
   VM_HOST="${VM_HOST:-${LOGIN_IP:-}}"
+  VM_HOST="$(extract_first_ipv4 "$VM_HOST")"
+  LOGIN_IP="$VM_HOST"
   SSH_USER="${SSH_USER:-${LOGIN_USER:-root}}"
   SSH_PORT="${SSH_PORT:-22}"
   SSH_PASSWORD="${SSH_PASSWORD:-${LOGIN_PASSWORD:-${ROOT_PASSWORD:-}}}"
   VERSION="${VERSION:-unknown}"
   SERVER_ID="${SERVER_ID:-}"
   VM_NAME="${VM_NAME:-}"
-  [[ -n "$VM_HOST" ]] || DIE "VM_HOST / LOGIN_IP missing in $1"
-  [[ -n "$SSH_USER" ]] || DIE "SSH_USER missing in $1"
-  [[ -n "$SSH_PASSWORD" ]] || DIE "SSH_PASSWORD / ROOT_PASSWORD missing in $1"
-  [[ -n "$SERVER_ID" ]] || DIE "SERVER_ID missing in $1"
+  [[ -n "$VM_HOST" ]] || DIE "VM_HOST / LOGIN_IP missing or unparsable in $1"
+  [[ -n "$SSH_USER" && -n "$SSH_PASSWORD" && -n "$SERVER_ID" ]] || DIE "SSH_USER/SSH_PASSWORD/SERVER_ID missing in $1"
 }
 load_config_file "$CONFIG_FILE"
+
+# self-heal state file if older stage wrote dict-ish host
+sed -i "s|^VM_HOST=.*|VM_HOST=$VM_HOST|" "$CONFIG_FILE" 2>/dev/null || true
+if grep -q '^LOGIN_IP=' "$CONFIG_FILE" 2>/dev/null; then
+  sed -i "s|^LOGIN_IP=.*|LOGIN_IP=$VM_HOST|" "$CONFIG_FILE" 2>/dev/null || true
+else
+  printf '\nLOGIN_IP=%s\n' "$VM_HOST" >> "$CONFIG_FILE" 2>/dev/null || true
+fi
 
 CLEAN_STATE_FILE="$CLEAN_STATE_DIR/clean-${VERSION}.env"
 LOCAL_LOG="$LOG_DIR/final_clean_${VM_HOST}_${RUN_ID}.log"
@@ -121,15 +91,21 @@ LOG "LOCAL_LOG=$LOCAL_LOG"
 LOG "SUMMARY_FILE=$SUMMARY_FILE"
 LOG "REMOTE_LOG=$REMOTE_LOG"
 
-SSH_OPTS=(
-  -o StrictHostKeyChecking=no
-  -o UserKnownHostsFile=/dev/null
-  -o ConnectTimeout=10
-  -p "$SSH_PORT"
-)
+SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -p "$SSH_PORT")
+ssh_run(){ sshpass -p "$SSH_PASSWORD" ssh "${SSH_OPTS[@]}" "$SSH_USER@$VM_HOST" "$@"; }
+server_status(){ openstack server show "$SERVER_ID" -f value -c status 2>/dev/null || true; }
 
-ssh_run() {
-  sshpass -p "$SSH_PASSWORD" ssh "${SSH_OPTS[@]}" "$SSH_USER@$VM_HOST" "$@"
+wait_for_server_status() {
+  local desired="$1" timeout_sec="${2:-300}" start now st
+  start="$(date +%s)"
+  while true; do
+    st="$(server_status)"
+    [[ "$st" == "$desired" ]] && return 0
+    [[ "$st" == "ERROR" ]] && DIE "server entered ERROR state"
+    now="$(date +%s)"
+    (( now - start >= timeout_sec )) && DIE "timeout waiting for server status=$desired last_status=${st:-unknown}"
+    sleep 3
+  done
 }
 
 wait_for_ssh() {
@@ -142,31 +118,8 @@ wait_for_ssh() {
       return 0
     fi
     now="$(date +%s)"
-    if (( now - start >= timeout_sec )); then
-      return 1
-    fi
+    (( now - start >= timeout_sec )) && return 1
     sleep 2
-  done
-}
-
-server_status() {
-  openstack server show "$SERVER_ID" -f value -c status 2>/dev/null || true
-}
-
-wait_for_server_status() {
-  local desired="$1" timeout_sec="${2:-300}" start now st
-  start="$(date +%s)"
-  while true; do
-    st="$(server_status)"
-    [[ "$st" == "$desired" ]] && return 0
-    if [[ "$st" == "ERROR" ]]; then
-      DIE "server entered ERROR state"
-    fi
-    now="$(date +%s)"
-    if (( now - start >= timeout_sec )); then
-      DIE "timeout waiting for server status=$desired last_status=${st:-unknown}"
-    fi
-    sleep 3
   done
 }
 
@@ -209,7 +162,6 @@ if [[ "$pre_status" == "SHUTOFF" ]]; then
     LOG "DONE (already cleaned)"
     exit 0
   fi
-
   LOG "server is SHUTOFF but clean marker not found -> powering on first"
   openstack server start "$SERVER_ID" >/dev/null
   wait_for_server_status "ACTIVE" 300
@@ -217,66 +169,48 @@ fi
 
 current_status="$(server_status)"
 [[ "$current_status" == "ACTIVE" ]] || DIE "server must be ACTIVE before clean, got status=$current_status"
-
 wait_for_ssh "$VM_HOST" "$SSH_PORT" 300 || DIE "SSH did not become ready on $VM_HOST:$SSH_PORT"
 
 LOG "run final clean"
 set +e
-ssh_run \
-  "REMOTE_LOG_PATH='$REMOTE_LOG' BUILD_USER_HOME='$BUILD_USER_HOME' POWEROFF_WHEN_DONE='$POWEROFF_WHEN_DONE' bash -s" <<'REMOTE_EOF' | tee -a "$LOCAL_LOG" | tee "$REMOTE_RUN_LOG"
+ssh_run "REMOTE_LOG_PATH='$REMOTE_LOG' BUILD_USER_HOME='$BUILD_USER_HOME' POWEROFF_WHEN_DONE='$POWEROFF_WHEN_DONE' bash -s" <<'REMOTE_EOF' | tee -a "$LOCAL_LOG" | tee "$REMOTE_RUN_LOG"
 #!/usr/bin/env bash
 set -Eeuo pipefail
-
 LOG_FILE="${REMOTE_LOG_PATH:-/var/log/final-clean.log}"
 BUILD_USER_HOME="${BUILD_USER_HOME:-}"
 POWEROFF_WHEN_DONE="${POWEROFF_WHEN_DONE:-yes}"
-
 log(){ printf '[remote %s] %s\n' "$(date '+%F %T')" "$*" | tee -a "$LOG_FILE" ; }
-
 mkdir -p /var/log
 : > "$LOG_FILE"
-
 log "starting final clean"
 log "cloud-init clean"
 cloud-init clean --logs || true
 rm -rf /var/lib/cloud/instances/* /var/lib/cloud/instance /var/lib/cloud/sem/* || true
-
 log "remove cloud-init netplan"
 rm -f /etc/netplan/50-cloud-init.yaml || true
-
 log "clean machine-id"
 truncate -s 0 /etc/machine-id || true
 rm -f /var/lib/dbus/machine-id || true
 ln -sf /etc/machine-id /var/lib/dbus/machine-id || true
-
 log "remove ssh host keys"
 rm -f /etc/ssh/ssh_host_* || true
-
 log "remove build-time authorized_keys"
 rm -f /root/.ssh/authorized_keys || true
 rm -f /var/lib/cloud/scripts/per-instance/10-root-authorized-keys.sh || true
-if [[ -n "$BUILD_USER_HOME" ]]; then
-  rm -f "$BUILD_USER_HOME/.ssh/authorized_keys" || true
-fi
-
+if [[ -n "$BUILD_USER_HOME" ]]; then rm -f "$BUILD_USER_HOME/.ssh/authorized_keys" || true; fi
 log "clean apt cache"
 apt clean || true
 rm -rf /var/lib/apt/lists/* || true
-
 log "remove script artifacts"
 rm -f /root/.bash_history || true
 rm -f /home/*/.bash_history || true
 rm -rf /tmp/* /var/tmp/* || true
-
 log "clean temp and history"
 history -c || true
-
 log "validate keep file"
 ls -l /var/lib/cloud/scripts/per-instance/ || true
-
 log "sync"
 sync
-
 log "final clean done"
 if [[ "$POWEROFF_WHEN_DONE" == "yes" ]]; then
   log "poweroff"

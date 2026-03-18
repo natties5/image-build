@@ -111,6 +111,23 @@ extract_first_ipv4() {
   fi
 }
 
+
+normalize_state_host() {
+  local ip=""
+  ip="$(extract_first_ipv4 "${VM_HOST:-${LOGIN_IP:-}}")"
+  [[ -z "$ip" ]] && return 0
+  VM_HOST="$ip"
+  LOGIN_IP="$ip"
+  if [[ -n "${CONFIG_FILE:-}" && -f "$CONFIG_FILE" ]]; then
+    sed -i "s|^VM_HOST=.*|VM_HOST=$ip|" "$CONFIG_FILE" 2>/dev/null || true
+    if grep -q '^LOGIN_IP=' "$CONFIG_FILE" 2>/dev/null; then
+      sed -i "s|^LOGIN_IP=.*|LOGIN_IP=$ip|" "$CONFIG_FILE" 2>/dev/null || true
+    else
+      printf '\nLOGIN_IP=%s\n' "$ip" >> "$CONFIG_FILE" 2>/dev/null || true
+    fi
+  fi
+}
+
 if [[ -z "$CONFIG_FILE" ]]; then
   echo "usage: $0 <ubuntu-version | path-to-.configure.env>" >&2
   echo "example: $0 24.04" >&2
@@ -122,7 +139,9 @@ load_config_file "$CONFIG_FILE"
 if [[ -n "${LOGIN_IP:-}" && -z "${VM_HOST:-}" ]]; then
   VM_HOST="$LOGIN_IP"
 fi
+normalize_state_host
 VM_HOST="$(extract_first_ipv4 "${VM_HOST:-}")"
+LOGIN_IP="$VM_HOST"
 
 [[ -n "$VM_HOST" ]] || { echo "VM_HOST is empty" >&2; exit 1; }
 [[ -n "$SSH_USER" ]] || { echo "SSH_USER is empty" >&2; exit 1; }
@@ -617,15 +636,7 @@ validate_state() {
   grep -qi '^passwordauthentication yes$' <<<"$sshd_effective"
   grep -qi '^pubkeyauthentication yes$' <<<"$sshd_effective"
   grep -q '^LANG=en_US.UTF-8' /etc/default/locale
-local tz_current=""
-tz_current="$(timedatectl show -p Timezone --value 2>/dev/null || true)"
-if [[ -z "$tz_current" && -f /etc/timezone ]]; then
-  tz_current="$(tr -d ' \t\r\n' < /etc/timezone || true)"
-fi
-if [[ -z "$tz_current" && -L /etc/localtime ]]; then
-  tz_current="$(readlink -f /etc/localtime 2>/dev/null | sed 's#^.*/zoneinfo/##' || true)"
-fi
-test "$tz_current" = "$TIMEZONE"
+  test "$(timedatectl show -p Timezone --value 2>/dev/null || true)" = "$TIMEZONE"
   test -f /var/lib/cloud/scripts/per-instance/10-root-authorized-keys.sh
 
   if [[ -f /etc/ssh/sshd_config.d/99-phase2-root.conf ]]; then
