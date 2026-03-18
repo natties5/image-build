@@ -1,4 +1,3 @@
-\
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
@@ -18,7 +17,6 @@ die() {
   log "ERROR: $*"
   exit 1
 }
-
 trap 'die "line=$LINENO cmd=$BASH_COMMAND"' ERR
 
 [[ -f "$SUMMARY_FILE" ]] || die "summary file not found: $SUMMARY_FILE"
