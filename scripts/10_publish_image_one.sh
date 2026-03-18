@@ -25,29 +25,33 @@ CONFIG_FILE="$(resolve_input_arg "$CONFIG_ARG_RAW")"
 [[ -n "$CONFIG_FILE" && -f "$CONFIG_FILE" ]] || { echo "usage: $0 <ubuntu-version | path-to-.configure.env>" >&2; exit 1; }
 
 [[ -f "$OPENRC_PATH_FILE" ]] || { echo "missing config: $OPENRC_PATH_FILE" >&2; exit 1; }
+# shellcheck disable=SC1090
 source "$OPENRC_PATH_FILE"
 [[ -n "${OPENRC_FILE:-}" && -f "$OPENRC_FILE" ]] || { echo "OPENRC_FILE invalid" >&2; exit 1; }
+# shellcheck disable=SC1090
 source "$OPENRC_FILE"
 
 if [[ -f "$PUBLISH_CONFIG_FILE" ]]; then
+  # shellcheck disable=SC1090
   source "$PUBLISH_CONFIG_FILE"
 fi
 
 PIPELINE_ROOT="${PIPELINE_ROOT:-$REPO_ROOT}"
-FINAL_IMAGE_NAME_TEMPLATE="${FINAL_IMAGE_NAME_TEMPLATE:-ubuntu-{version}-golden}"
+FINAL_IMAGE_NAME_TEMPLATE="${FINAL_IMAGE_NAME_TEMPLATE:-ubuntu-{version}-complete-{date}}"
 FINAL_IMAGE_VISIBILITY="${FINAL_IMAGE_VISIBILITY:-private}"
-FINAL_IMAGE_TAGS="${FINAL_IMAGE_TAGS:-stage:final,os:ubuntu}"
+FINAL_IMAGE_TAGS="${FINAL_IMAGE_TAGS:-stage:complete,os:ubuntu}"
 ON_FINAL_EXISTS="${ON_FINAL_EXISTS:-error}"
 WAIT_FOR_FINAL_ACTIVE="${WAIT_FOR_FINAL_ACTIVE:-yes}"
 WAIT_FINAL_TIMEOUT_SECONDS="${WAIT_FINAL_TIMEOUT_SECONDS:-3600}"
 WAIT_FINAL_INTERVAL_SECONDS="${WAIT_FINAL_INTERVAL_SECONDS:-10}"
-DELETE_SERVER_AFTER_PUBLISH="${DELETE_SERVER_AFTER_PUBLISH:-yes}"
+DELETE_SERVER_BEFORE_PUBLISH="${DELETE_SERVER_BEFORE_PUBLISH:-yes}"
 DELETE_VOLUME_AFTER_PUBLISH="${DELETE_VOLUME_AFTER_PUBLISH:-yes}"
 DELETE_BASE_IMAGE_AFTER_PUBLISH="${DELETE_BASE_IMAGE_AFTER_PUBLISH:-yes}"
 SET_OS_DISTRO_PROPERTY="${SET_OS_DISTRO_PROPERTY:-yes}"
 SET_OS_VERSION_PROPERTY="${SET_OS_VERSION_PROPERTY:-yes}"
 
 RUN_ID="$(date +%Y%m%d%H%M%S)"
+TODAY_YYYYMMDD="$(date +%Y%m%d)"
 LOCAL_LOG="$LOG_DIR/10_publish_image_one_${RUN_ID}.log"
 : > "$LOCAL_LOG"
 
@@ -60,6 +64,7 @@ for c in openstack awk grep sed head; do need_cmd "$c"; done
 
 openstack token issue >/dev/null
 
+# shellcheck disable=SC1090
 source "$CONFIG_FILE"
 
 VERSION="${VERSION:-unknown}"
@@ -69,38 +74,40 @@ BASE_IMAGE_ID="${IMAGE_ID:-}"
 VM_NAME="${VM_NAME:-}"
 [[ -n "$SERVER_ID" && -n "$VOLUME_ID" && -n "$BASE_IMAGE_ID" ]] || die "SERVER_ID/VOLUME_ID/IMAGE_ID missing in $CONFIG_FILE"
 
+server_exists() { openstack server show "$SERVER_ID" >/dev/null 2>&1; }
 server_status() { openstack server show "$SERVER_ID" -f value -c status 2>/dev/null || true; }
-wait_for_status() {
-  local kind="$1" id="$2" desired="$3" timeout_sec="$4" interval_sec="$5" st start now
+volume_status() { openstack volume show "$VOLUME_ID" -f value -c status 2>/dev/null || true; }
+image_status() { openstack image show "$1" -f value -c status 2>/dev/null || true; }
+
+wait_for_volume_status() {
+  local desired="$1" timeout_sec="$2" interval_sec="$3" st start now
   start="$(date +%s)"
   while true; do
-    if [[ "$kind" == "image" ]]; then
-      st="$(openstack image show "$id" -f value -c status 2>/dev/null || true)"
-    elif [[ "$kind" == "server" ]]; then
-      st="$(openstack server show "$id" -f value -c status 2>/dev/null || true)"
-    elif [[ "$kind" == "volume" ]]; then
-      st="$(openstack volume show "$id" -f value -c status 2>/dev/null || true)"
-    else
-      die "unknown kind=$kind"
-    fi
+    st="$(volume_status)"
     [[ "$st" == "$desired" ]] && return 0
-    if [[ "$kind" == "image" && ( "$st" == "killed" || "$st" == "deleted" || "$st" == "deactivated" ) ]]; then
-      die "image entered bad status=$st id=$id"
-    fi
-    if [[ "$kind" == "server" && "$st" == "ERROR" ]]; then
-      die "server entered ERROR id=$id"
-    fi
+    [[ "$st" == "error" || "$st" == "error_restoring" || "$st" == "error_extending" || "$st" == "error_managing" ]] && die "volume entered bad status=$st"
     now="$(date +%s)"
-    (( now - start >= timeout_sec )) && die "timeout waiting for $kind id=$id status=$desired last_status=${st:-unknown}"
+    (( now - start >= timeout_sec )) && die "timeout waiting for volume status=$desired last_status=${st:-unknown}"
     sleep "$interval_sec"
   done
 }
 
-pre_status="$(server_status)"
-log "server status before publish=$pre_status"
-[[ "$pre_status" == "SHUTOFF" ]] || die "server must be SHUTOFF before publish"
+wait_for_image_status() {
+  local image_id="$1" desired="$2" timeout_sec="$3" interval_sec="$4" st start now
+  start="$(date +%s)"
+  while true; do
+    st="$(image_status "$image_id")"
+    [[ "$st" == "$desired" ]] && return 0
+    [[ "$st" == "killed" || "$st" == "deleted" || "$st" == "deactivated" ]] && die "image entered bad status=$st id=$image_id"
+    now="$(date +%s)"
+    (( now - start >= timeout_sec )) && die "timeout waiting for image id=$image_id status=$desired last_status=${st:-unknown}"
+    sleep "$interval_sec"
+  done
+}
 
 final_image_name="${FINAL_IMAGE_NAME_TEMPLATE//\{version\}/$VERSION}"
+final_image_name="${final_image_name//\{date\}/$TODAY_YYYYMMDD}"
+
 existing_final_id="$(openstack image list --name "$final_image_name" -f value -c ID | head -n1 || true)"
 if [[ -n "$existing_final_id" ]]; then
   case "$ON_FINAL_EXISTS" in
@@ -118,24 +125,48 @@ if [[ -n "$existing_final_id" ]]; then
 fi
 
 if [[ -z "${final_image_id:-}" ]]; then
+  if [[ "$DELETE_SERVER_BEFORE_PUBLISH" == "yes" ]]; then
+    if server_exists; then
+      pre_server_status="$(server_status)"
+      log "deleting server before publish id=$SERVER_ID status=$pre_server_status"
+      openstack server delete "$SERVER_ID"
+      log "waiting for boot volume to become available"
+      wait_for_volume_status "available" 600 5
+    else
+      log "server already absent id=$SERVER_ID"
+      log "waiting for boot volume to become available"
+      wait_for_volume_status "available" 600 5
+    fi
+  else
+    pre_server_status="$(server_status)"
+    log "server status before publish=$pre_server_status"
+    [[ "$pre_server_status" == "SHUTOFF" ]] || die "server must be SHUTOFF before publish when DELETE_SERVER_BEFORE_PUBLISH=no"
+  fi
+
   log "creating final image from volume_id=$VOLUME_ID name=$final_image_name"
-  create_args=(image create "$final_image_name" --volume "$VOLUME_ID")
-  case "$FINAL_IMAGE_VISIBILITY" in
-    private) create_args+=(--private) ;;
-    public) create_args+=(--public) ;;
-    community) create_args+=(--community) ;;
-    shared) create_args+=(--shared) ;;
-    *) die "invalid FINAL_IMAGE_VISIBILITY=$FINAL_IMAGE_VISIBILITY" ;;
-  esac
-  if [[ "$SET_OS_DISTRO_PROPERTY" == "yes" ]]; then create_args+=(--property os_distro=ubuntu); fi
-  if [[ "$SET_OS_VERSION_PROPERTY" == "yes" ]]; then create_args+=(--property os_version="$VERSION"); fi
-  create_args+=(--property pipeline_stage=final)
-  create_args+=(--property source_server_id="$SERVER_ID")
-  create_args+=(--property source_volume_id="$VOLUME_ID")
-  create_args+=(--property source_base_image_id="$BASE_IMAGE_ID")
-  final_image_id="$(openstack "${create_args[@]}" -f value -c id)"
+  final_image_id="$(openstack image create "$final_image_name" --volume "$VOLUME_ID" -f value -c id)"
   [[ -n "$final_image_id" ]] || die "failed to create final image"
 fi
+
+if [[ "$WAIT_FOR_FINAL_ACTIVE" == "yes" ]]; then
+  log "waiting for final image to become active id=$final_image_id"
+  wait_for_image_status "$final_image_id" active "$WAIT_FINAL_TIMEOUT_SECONDS" "$WAIT_FINAL_INTERVAL_SECONDS"
+fi
+
+final_image_status="$(image_status "$final_image_id")"
+[[ "$final_image_status" == "active" ]] || die "final image not active: id=$final_image_id status=$final_image_status"
+
+# apply metadata after image becomes active
+if [[ "$SET_OS_DISTRO_PROPERTY" == "yes" ]]; then
+  openstack image set --property os_distro=ubuntu "$final_image_id"
+fi
+if [[ "$SET_OS_VERSION_PROPERTY" == "yes" ]]; then
+  openstack image set --property os_version="$VERSION" "$final_image_id"
+fi
+openstack image set --property pipeline_stage=complete "$final_image_id"
+openstack image set --property source_server_id="$SERVER_ID" "$final_image_id"
+openstack image set --property source_volume_id="$VOLUME_ID" "$final_image_id"
+openstack image set --property source_base_image_id="$BASE_IMAGE_ID" "$final_image_id"
 
 IFS=',' read -r -a tags_array <<< "$FINAL_IMAGE_TAGS"
 for tag in "${tags_array[@]}"; do
@@ -144,13 +175,13 @@ for tag in "${tags_array[@]}"; do
   openstack image set --tag "$tag" "$final_image_id"
 done
 
-if [[ "$WAIT_FOR_FINAL_ACTIVE" == "yes" ]]; then
-  log "waiting for final image to become active id=$final_image_id"
-  wait_for_status image "$final_image_id" active "$WAIT_FINAL_TIMEOUT_SECONDS" "$WAIT_FINAL_INTERVAL_SECONDS"
-fi
-
-final_image_status="$(openstack image show "$final_image_id" -f value -c status)"
-[[ "$final_image_status" == "active" ]] || die "final image not active: id=$final_image_id status=$final_image_status"
+case "$FINAL_IMAGE_VISIBILITY" in
+  private) openstack image set --private "$final_image_id" || true ;;
+  public) openstack image set --public "$final_image_id" || true ;;
+  community) openstack image set --community "$final_image_id" || true ;;
+  shared) openstack image set --shared "$final_image_id" || true ;;
+  *) die "invalid FINAL_IMAGE_VISIBILITY=$FINAL_IMAGE_VISIBILITY" ;;
+esac
 
 manifest_file="$MANIFEST_DIR/final-image-${VERSION}.env"
 cat > "$manifest_file" <<EOF
@@ -161,20 +192,16 @@ FINAL_IMAGE_STATUS=$final_image_status
 SOURCE_SERVER_ID=$SERVER_ID
 SOURCE_VOLUME_ID=$VOLUME_ID
 SOURCE_BASE_IMAGE_ID=$BASE_IMAGE_ID
-DELETE_SERVER_AFTER_PUBLISH=$DELETE_SERVER_AFTER_PUBLISH
+DELETE_SERVER_BEFORE_PUBLISH=$DELETE_SERVER_BEFORE_PUBLISH
 DELETE_VOLUME_AFTER_PUBLISH=$DELETE_VOLUME_AFTER_PUBLISH
 DELETE_BASE_IMAGE_AFTER_PUBLISH=$DELETE_BASE_IMAGE_AFTER_PUBLISH
+PUBLISHED_AT=$RUN_ID
 EOF
 
 cp -f "$manifest_file" "$STATE_DIR/current.final-image-${VERSION}.env"
 cp -f "$manifest_file" "$STATE_DIR/current.final-image.env"
 
 log "final image created successfully name=$final_image_name id=$final_image_id"
-
-if [[ "$DELETE_SERVER_AFTER_PUBLISH" == "yes" ]]; then
-  log "deleting server id=$SERVER_ID"
-  openstack server delete "$SERVER_ID"
-fi
 
 if [[ "$DELETE_VOLUME_AFTER_PUBLISH" == "yes" ]]; then
   log "deleting volume id=$VOLUME_ID"
