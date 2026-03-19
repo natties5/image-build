@@ -4,7 +4,10 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 # shellcheck disable=SC1091
 source "$REPO_ROOT/lib/layout.sh"
+# shellcheck disable=SC1091
+source "$REPO_ROOT/lib/local_overrides.sh"
 imagectl_init_layout "$REPO_ROOT"
+imagectl_source_local_overrides "$REPO_ROOT"
 SUMMARY_FILE="$(imagectl_resolve_summary_for_read)"
 LOG_DIR="${LOG_DIR:-$REPO_ROOT/logs}"
 mkdir -p "$LOG_DIR"

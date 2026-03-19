@@ -3,6 +3,8 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+# shellcheck disable=SC1091
+source "$REPO_ROOT/lib/local_overrides.sh"
 STAGE_CONFIG_FILE="${STAGE_CONFIG_FILE:-$REPO_ROOT/config/guest/policy.env}"
 LEGACY_STAGE_CONFIG_FILE="${REPO_ROOT}/config/guest-config.env"
 STATE_DIR="${STATE_DIR:-$REPO_ROOT/runtime/state}"
@@ -46,7 +48,7 @@ SSH_PORT="22"
 SSH_USER="root"
 SSH_PRIVATE_KEY=""
 SSH_PASSWORD=""
-ROOT_PASSWORD="mis@Pass01"
+ROOT_PASSWORD=""
 
 OLS_BASE_URL="http://mirrors.openlandscape.cloud/ubuntu"
 OLD_RELEASES_URL="http://old-releases.ubuntu.com/ubuntu"
@@ -84,6 +86,7 @@ if [[ -f "$LEGACY_STAGE_CONFIG_FILE" ]]; then
   source "$LEGACY_STAGE_CONFIG_FILE"
   set +a
 fi
+imagectl_source_local_overrides "$REPO_ROOT"
 
 load_config_file() {
   local cfg="${1:-}"

@@ -3,6 +3,8 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+# shellcheck disable=SC1091
+source "$REPO_ROOT/lib/local_overrides.sh"
 STATE_DIR="${STATE_DIR:-$REPO_ROOT/runtime/state}"
 LOG_DIR="${LOG_DIR:-$REPO_ROOT/logs}"
 CLEAN_STATE_DIR="${CLEAN_STATE_DIR:-$STATE_DIR/clean}"
@@ -37,6 +39,7 @@ need_cmd(){ command -v "$1" >/dev/null 2>&1 || DIE "missing command: $1"; }
 for c in ssh sshpass openstack awk sed grep timeout; do need_cmd "$c"; done
 
 [[ -n "$CONFIG_FILE" && -f "$CONFIG_FILE" ]] || { echo "usage: $0 <ubuntu-version | path-to-.configure.env>" >&2; exit 1; }
+imagectl_source_local_overrides "$REPO_ROOT"
 [[ -f "$OPENRC_PATH_FILE" ]] || DIE "missing config: $OPENRC_PATH_FILE"
 source "$OPENRC_PATH_FILE"
 [[ -n "${OPENRC_FILE:-}" && -f "$OPENRC_FILE" ]] || DIE "OPENRC_FILE invalid"

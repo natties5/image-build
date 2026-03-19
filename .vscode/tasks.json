@@ -1,0 +1,47 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "control: help",
+      "type": "shell",
+      "command": "bash scripts/control.sh --help",
+      "problemMatcher": []
+    },
+    {
+      "label": "control: status",
+      "type": "shell",
+      "command": "bash scripts/control.sh status",
+      "problemMatcher": []
+    },
+    {
+      "label": "control: manual",
+      "type": "shell",
+      "command": "bash scripts/control.sh manual",
+      "problemMatcher": []
+    },
+    {
+      "label": "control: auto ubuntu",
+      "type": "shell",
+      "command": "bash scripts/control.sh auto --os ubuntu --version 24.04",
+      "problemMatcher": []
+    },
+    {
+      "label": "control: sync safe",
+      "type": "shell",
+      "command": "bash scripts/control.sh sync --mode safe",
+      "problemMatcher": []
+    },
+    {
+      "label": "control: sync code-overwrite",
+      "type": "shell",
+      "command": "bash scripts/control.sh sync --mode code-overwrite",
+      "problemMatcher": []
+    },
+    {
+      "label": "control: sync clean",
+      "type": "shell",
+      "command": "bash scripts/control.sh sync --mode clean",
+      "problemMatcher": []
+    }
+  ]
+}

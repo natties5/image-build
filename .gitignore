@@ -1,0 +1,9 @@
+# Local-only jump-host files
+deploy/local/**
+!deploy/local/.gitkeep
+
+# Runtime/build artifacts
+cache/**
+tmp/**
+runtime/state/**
+logs/*.log

@@ -4,10 +4,13 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 # shellcheck disable=SC1091
 source "$REPO_ROOT/lib/layout.sh"
+# shellcheck disable=SC1091
+source "$REPO_ROOT/lib/local_overrides.sh"
 imagectl_init_layout "$REPO_ROOT"
 OPENSTACK_ENV_FILE="${OPENSTACK_ENV_FILE:-$REPO_ROOT/config/openstack.env}"
 [[ -f "$OPENSTACK_ENV_FILE" ]] || { echo "missing config: $OPENSTACK_ENV_FILE" >&2; exit 1; }
 source "$OPENSTACK_ENV_FILE"
+imagectl_source_local_overrides "$REPO_ROOT"
 imagectl_init_layout "$REPO_ROOT"
 PIPELINE_ROOT="${PIPELINE_ROOT:-$REPO_ROOT}"
 SUMMARY_FILE="$(imagectl_resolve_summary_for_read)"

@@ -5,6 +5,8 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 # shellcheck disable=SC1091
 source "$REPO_ROOT/lib/layout.sh"
+# shellcheck disable=SC1091
+source "$REPO_ROOT/lib/local_overrides.sh"
 imagectl_init_layout "$REPO_ROOT"
 imagectl_ensure_layout_dirs
 STATE_DIR="${STATE_DIR:-$REPO_ROOT/runtime/state}"
@@ -28,6 +30,7 @@ resolve_input_arg() {
 CONFIG_FILE="$(resolve_input_arg "${1:-}")"
 [[ -n "$CONFIG_FILE" && -f "$CONFIG_FILE" ]] || { echo "usage: $0 <ubuntu-version | path-to-.configure.env>" >&2; exit 1; }
 
+imagectl_source_local_overrides "$REPO_ROOT"
 [[ -f "$OPENRC_PATH_FILE" ]] || { echo "missing config: $OPENRC_PATH_FILE" >&2; exit 1; }
 # shellcheck disable=SC1090
 source "$OPENRC_PATH_FILE"

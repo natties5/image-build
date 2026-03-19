@@ -5,6 +5,8 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 # shellcheck disable=SC1091
 source "$REPO_ROOT/lib/layout.sh"
+# shellcheck disable=SC1091
+source "$REPO_ROOT/lib/local_overrides.sh"
 imagectl_init_layout "$REPO_ROOT"
 imagectl_ensure_layout_dirs
 
@@ -14,6 +16,7 @@ OPENRC_PATH_FILE="${OPENRC_PATH_FILE:-$REPO_ROOT/config/openrc.path}"
 [[ -f "$OPENSTACK_ENV_FILE" ]] || { echo "missing config: $OPENSTACK_ENV_FILE" >&2; exit 1; }
 # shellcheck disable=SC1090
 source "$OPENSTACK_ENV_FILE"
+imagectl_source_local_overrides "$REPO_ROOT"
 imagectl_init_layout "$REPO_ROOT"
 
 [[ -f "$OPENRC_PATH_FILE" ]] || { echo "missing config: $OPENRC_PATH_FILE" >&2; exit 1; }
