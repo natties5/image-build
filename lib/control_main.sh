@@ -96,7 +96,9 @@ imagectl_manual_menu_once() {
       if imagectl_phase_requires_version "$action"; then
         [[ -n "$version" ]] || imagectl_die "version is required for action '$action'"
       fi
-      imagectl_runtime_prepare_for_action "$action"
+      if [[ "$action" == "create" || "$action" == "configure" || "$action" == "publish" ]]; then
+        imagectl_runtime_prepare_for_action "$action"
+      fi
       imagectl_run_phase_remote "$os" "$action" "$version"
       ;;
     download)
