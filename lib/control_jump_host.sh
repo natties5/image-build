@@ -88,6 +88,31 @@ imagectl_run_remote_repo_cmd() {
   imagectl_run_remote_cmd "set -euo pipefail; cd $repo_q; $repo_cmd"
 }
 
+imagectl_upload_file_to_remote_repo() {
+  local local_file="$1"
+  local remote_rel="$2"
+  local remote_dir=""
+  local repo_q=""
+  local dir_q=""
+  local rel_q=""
+  local cmd=""
+  local target=""
+  local -a opts
+  local quoted_cmd=""
+
+  [[ -f "$local_file" ]] || imagectl_die "local file not found for upload: $local_file"
+  remote_dir="$(dirname -- "$remote_rel")"
+  repo_q="$(printf '%q' "$JUMP_HOST_REPO_PATH")"
+  dir_q="$(printf '%q' "$remote_dir")"
+  rel_q="$(printf '%q' "$remote_rel")"
+  cmd="set -euo pipefail; cd $repo_q; mkdir -p $dir_q; cat > $rel_q"
+  quoted_cmd="$(printf '%q' "$cmd")"
+
+  target="$(imagectl_jump_target)"
+  mapfile -t opts < <(imagectl_jump_ssh_opts noninteractive)
+  ssh "${opts[@]}" "$target" "bash -lc $quoted_cmd" < "$local_file"
+}
+
 imagectl_check_remote_connection() {
   imagectl_need_cmd ssh
   imagectl_run_remote_cmd "echo jump-host-ok"

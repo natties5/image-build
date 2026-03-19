@@ -76,6 +76,8 @@ Pipeline execution always uses dependency-aware order:
 
 Version choices are manifest-driven. If no manifest versions are found, run discover first.
 
+Before mutating phases, controller validates required local runtime config and syncs required runtime env files to jump host.
+
 ### Manual Mode
 
 Flow:
@@ -106,9 +108,12 @@ Flow:
 
 1. Select OS
 2. Controller runs discover first
-3. Load all discovered versions
-4. Run full pipeline (`preflight -> import -> create -> configure -> clean -> publish`) for each version
-5. Show per-version summary
+3. Validate required local runtime config (including `ROOT_PASSWORD`)
+4. Sync required runtime config to jump host repo (`deploy/local/`)
+5. Validate synced runtime config exists remotely
+6. Load all discovered versions
+7. Run full pipeline (`preflight -> import -> create -> configure -> clean -> publish`) for each version
+8. Show per-version summary
 
 ### Auto by OS Version
 
@@ -116,10 +121,13 @@ Flow:
 
 1. Select OS
 2. Controller runs discover first
-3. Load discovered versions
-4. Select one discovered version
-5. Run full pipeline for that version
-6. Show summary
+3. Validate required local runtime config (including `ROOT_PASSWORD`)
+4. Sync required runtime config to jump host repo (`deploy/local/`)
+5. Validate synced runtime config exists remotely
+6. Load discovered versions
+7. Select one discovered version
+8. Run full pipeline for that version
+9. Show summary
 
 Direct commands:
 
@@ -146,6 +154,25 @@ Set `EXPECTED_PROJECT_NAME` in one of:
 - shell environment before running the command
 
 Controller-based preflight runs pass this value automatically.
+
+## Remote Runtime Config Sync
+
+Controller syncs only required runtime env files (if present):
+
+- `deploy/local/guest-access.env`
+- `deploy/local/openstack.env`
+- `deploy/local/openrc.path`
+- `deploy/local/publish.env`
+- `deploy/local/clean.env`
+
+Synced destination on jump host:
+
+- `<JUMP_HOST_REPO_PATH>/deploy/local/`
+
+Never synced:
+
+- `deploy/local/ssh_config`
+- `deploy/local/ssh/*` private keys
 
 ## Local-Only Jump-Host Files
 

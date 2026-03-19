@@ -49,6 +49,22 @@ Legacy wrappers under `scripts/01..11_*.sh` and `bin/imagectl.sh` remain support
 - Pipeline:
   - `Manual`, `Auto by OS`, `Auto by OS Version`, `Status`, `Logs`.
   - Controller enforces discover first, then manifest-driven version choices.
+  - Before mutating phases, controller validates local runtime config and syncs required `deploy/local/*.env` files to jump host repo at `deploy/local/`.
+
+## Remote Runtime Config Sync
+
+Controller syncs only required runtime env files (if present) from local repo to jump-host repo:
+
+- `deploy/local/guest-access.env`
+- `deploy/local/openstack.env`
+- `deploy/local/openrc.path`
+- `deploy/local/publish.env`
+- `deploy/local/clean.env`
+
+Never copied by controller:
+
+- `deploy/local/ssh_config`
+- `deploy/local/ssh/*` private keys
 
 ## Sync Modes
 

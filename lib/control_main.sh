@@ -12,6 +12,8 @@ source "$SCRIPT_DIR/control_jump_host.sh"
 source "$SCRIPT_DIR/control_sync.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/control_git.sh"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/control_runtime_config.sh"
 
 imagectl_control_usage() {
   cat <<'EOF'
@@ -94,6 +96,7 @@ imagectl_manual_menu_once() {
       if imagectl_phase_requires_version "$action"; then
         [[ -n "$version" ]] || imagectl_die "version is required for action '$action'"
       fi
+      imagectl_runtime_prepare_for_action "$action"
       imagectl_run_phase_remote "$os" "$action" "$version"
       ;;
     download)
@@ -259,6 +262,7 @@ imagectl_auto_by_os() {
 
   imagectl_run_discover_for_os "$os"
   mapfile -t versions < <(imagectl_require_versions_from_manifest_remote "$os")
+  imagectl_runtime_prepare_for_full_pipeline
 
   imagectl_log "auto-by-os start os=$os discovered_versions=${#versions[@]} fail_fast=$fail_fast"
   for version in "${versions[@]}"; do
@@ -319,6 +323,7 @@ imagectl_auto_by_os_version() {
 
   imagectl_run_discover_for_os "$os"
   mapfile -t versions < <(imagectl_require_versions_from_manifest_remote "$os")
+  imagectl_runtime_prepare_for_full_pipeline
 
   if [[ -z "$version" ]]; then
     version="$(imagectl_select_from_list "select version for auto-by-os-version (os=$os)" "${versions[@]}")"
