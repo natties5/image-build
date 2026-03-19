@@ -1,4 +1,3 @@
-\
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
@@ -34,7 +33,8 @@ OPENSTACK_MANIFEST_DIR="${OPENSTACK_MANIFEST_DIR:-$PIPELINE_ROOT/manifest/openst
 STATE_DIR="${STATE_DIR:-$PIPELINE_ROOT/runtime/state}"
 LOG_DIR="${LOG_DIR:-$PIPELINE_ROOT/logs}"
 
-BASE_IMAGE_NAME_TEMPLATE="${BASE_IMAGE_NAME_TEMPLATE:-ubuntu-{version}-base-official}"
+DEFAULT_BASE_IMAGE_NAME_TEMPLATE="ubuntu-{version}-base-official"
+BASE_IMAGE_NAME_TEMPLATE="${BASE_IMAGE_NAME_TEMPLATE:-$DEFAULT_BASE_IMAGE_NAME_TEMPLATE}"
 IMAGE_VISIBILITY="${IMAGE_VISIBILITY:-private}"
 IMAGE_TAGS="${IMAGE_TAGS:-source:official,stage:base,os:ubuntu}"
 SET_OS_DISTRO_PROPERTY="${SET_OS_DISTRO_PROPERTY:-yes}"
@@ -78,6 +78,11 @@ source "$OPENRC_FILE"
 openstack token issue >/dev/null
 
 [[ -f "$SUMMARY_FILE" ]] || die "summary file not found: $SUMMARY_FILE"
+
+if [[ "$BASE_IMAGE_NAME_TEMPLATE" != *"{version}"* ]]; then
+  log "WARN: BASE_IMAGE_NAME_TEMPLATE malformed: '$BASE_IMAGE_NAME_TEMPLATE' -> using default '$DEFAULT_BASE_IMAGE_NAME_TEMPLATE'"
+  BASE_IMAGE_NAME_TEMPLATE="$DEFAULT_BASE_IMAGE_NAME_TEMPLATE"
+fi
 
 row="$(awk -F '\t' -v ver="$VERSION" 'NR>1 && $1==ver {print; exit}' "$SUMMARY_FILE")"
 [[ -n "$row" ]] || die "version $VERSION not found in summary file: $SUMMARY_FILE"

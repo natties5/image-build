@@ -11,7 +11,7 @@ die(){ log "ERROR: $*"; exit 1; }
 trap 'die "line=$LINENO cmd=$BASH_COMMAND"' ERR
 [[ -f "$SUMMARY_FILE" ]] || die "summary file not found: $SUMMARY_FILE"
 [[ -x "$SCRIPT_DIR/07_clean_vm_one.sh" ]] || die "script not executable: $SCRIPT_DIR/07_clean_vm_one.sh"
-mapfile -t versions < <(awk -F '\t' 'NR>1 && $1 != "" {print $1}' "$SUMMARY_FILE")
+mapfile -t versions < <(awk -F '\t' 'NR>1 && $1 != "" && !seen[$1]++ {print $1}' "$SUMMARY_FILE")
 [[ ${#versions[@]} -gt 0 ]] || die "no version rows found in $SUMMARY_FILE"
 log "versions selected: ${versions[*]}"
 for version in "${versions[@]}"; do

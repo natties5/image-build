@@ -39,8 +39,10 @@ SECURITY_GROUP="${SECURITY_GROUP:-}"
 KEY_NAME="${KEY_NAME:-}"
 FLOATING_NETWORK="${FLOATING_NETWORK:-}"
 EXISTING_FLOATING_IP="${EXISTING_FLOATING_IP:-}"
-VM_NAME_TEMPLATE="${VM_NAME_TEMPLATE:-ubuntu-{version}-ci-{ts}}"
-VOLUME_NAME_TEMPLATE="${VOLUME_NAME_TEMPLATE:-{vm_name}-boot}"
+DEFAULT_VM_NAME_TEMPLATE="ubuntu-{version}-ci-{ts}"
+DEFAULT_VOLUME_NAME_TEMPLATE="{vm_name}-boot"
+VM_NAME_TEMPLATE="${VM_NAME_TEMPLATE:-$DEFAULT_VM_NAME_TEMPLATE}"
+VOLUME_NAME_TEMPLATE="${VOLUME_NAME_TEMPLATE:-$DEFAULT_VOLUME_NAME_TEMPLATE}"
 
 mkdir -p "$STATE_DIR" "$LOG_DIR" "$OUTPUT_DIR"
 LOG_FILE="$LOG_DIR/04_create_vm_one.log"
@@ -68,6 +70,15 @@ IMAGE_NAME="${BASE_IMAGE_NAME:-}"
 [[ -n "$IMAGE_ID" && -n "$IMAGE_NAME" ]] || die "BASE_IMAGE_ID/BASE_IMAGE_NAME missing in $manifest_file"
 openstack image show "$IMAGE_ID" >/dev/null
 
+if [[ "$VM_NAME_TEMPLATE" != *"{version}"* || "$VM_NAME_TEMPLATE" != *"{ts}"* ]]; then
+  log "WARN: VM_NAME_TEMPLATE malformed: '$VM_NAME_TEMPLATE' -> using default '$DEFAULT_VM_NAME_TEMPLATE'"
+  VM_NAME_TEMPLATE="$DEFAULT_VM_NAME_TEMPLATE"
+fi
+if [[ "$VOLUME_NAME_TEMPLATE" != *"{vm_name}"* ]]; then
+  log "WARN: VOLUME_NAME_TEMPLATE malformed: '$VOLUME_NAME_TEMPLATE' -> using default '$DEFAULT_VOLUME_NAME_TEMPLATE'"
+  VOLUME_NAME_TEMPLATE="$DEFAULT_VOLUME_NAME_TEMPLATE"
+fi
+
 extract_first_ipv4() {
   local s="${1:-}"
   local out
@@ -89,7 +100,7 @@ OUTPUT_ENV_FILE="$OUTPUT_DIR/${OUTPUT_PREFIX}.env"
 OUTPUT_TXT_FILE="$OUTPUT_DIR/${OUTPUT_PREFIX}.txt"
 OUTPUT_CONFIGURE_ENV_FILE="$OUTPUT_DIR/${OUTPUT_PREFIX}.configure.env"
 
-USER_DATA_FILE="$(mktemp /tmp/${VM_NAME}.cloudinit.XXXXXX.yaml)"
+USER_DATA_FILE="$(mktemp /tmp/"${VM_NAME}".cloudinit.XXXXXX.yaml)"
 trap 'rm -f "$USER_DATA_FILE"' EXIT
 
 {

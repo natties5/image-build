@@ -35,7 +35,7 @@ VERIFY_SHA256="${VERIFY_SHA256:-1}"
 mkdir -p "$CACHE_DIR" "$LOG_DIR" "$MANIFEST_DIR" "$TMP_DIR"
 
 LOG_FILE="$LOG_DIR/download-ubuntu-auto-discover.log"
-SUMMARY_FILE="$MANIFEST_DIR/ubuntu-auto-discover-summary.tsv"
+SUMMARY_FILE="${SUMMARY_FILE:-$MANIFEST_DIR/ubuntu-auto-discover-summary.tsv}"
 RUN_TS="$(date '+%Y%m%d%H%M%S')"
 
 log() {
