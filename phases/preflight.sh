@@ -23,6 +23,30 @@ log(){ printf '[%s] %s\n' "$(date '+%F %T')" "$*"; }
 warn(){ log "WARN: $*"; }
 die(){ log "ERROR: $*"; exit 1; }
 
+sanitize_project_value() {
+  local raw="${1:-}"
+  local cleaned=""
+  cleaned="$(
+    printf '%s\n' "$raw" | awk '
+      {
+        gsub(/\r/, "", $0)
+        gsub(/^[[:space:]]+/, "", $0)
+        gsub(/[[:space:]]+$/, "", $0)
+      }
+      length($0) {
+        print
+        exit
+      }'
+  )"
+  cleaned="${cleaned%%[[:space:]]*}"
+  cleaned="${cleaned%%\[*}"
+  printf '%s' "$cleaned"
+}
+
+quote_for_log() {
+  printf '%q' "$1"
+}
+
 need_cmd(){ command -v "$1" >/dev/null 2>&1 || die "missing command: $1"; }
 
 need_cmd openstack
@@ -44,6 +68,11 @@ if [[ -z "$EXPECTED_PROJECT_NAME" ]]; then
   echo "EXPECTED_PROJECT_NAME is required (set in deploy/local/openstack.env or export in environment)" >&2
   exit 1
 fi
+EXPECTED_PROJECT_NAME="$(sanitize_project_value "$EXPECTED_PROJECT_NAME")"
+if [[ -z "$EXPECTED_PROJECT_NAME" ]]; then
+  echo "EXPECTED_PROJECT_NAME resolved to empty after sanitization" >&2
+  exit 1
+fi
 
 [[ -n "${OPENRC_FILE:-}" ]] || die "OPENRC_FILE is empty in $OPENRC_PATH_FILE"
 [[ -f "$OPENRC_FILE" ]] || die "openrc file not found: $OPENRC_FILE"
@@ -54,17 +83,33 @@ source "$OPENRC_FILE"
 log "openrc sourced: $OPENRC_FILE"
 openstack token issue >/dev/null
 
-project_name="$(openstack project show -f value -c name "$OS_PROJECT_NAME" 2>/dev/null || true)"
-project_id="$(openstack project show -f value -c id "$OS_PROJECT_NAME" 2>/dev/null || true)"
+raw_project_name="$(openstack project show -f value -c name "$OS_PROJECT_NAME" 2>/dev/null || true)"
+raw_project_id="$(openstack project show -f value -c id "$OS_PROJECT_NAME" 2>/dev/null || true)"
+project_name="$(sanitize_project_value "$raw_project_name")"
+project_id="$(sanitize_project_value "$raw_project_id")"
+raw_token_project_id=""
+raw_fallback_project_name=""
 if [[ -z "$project_name" || -z "$project_id" ]]; then
   # fallback to token project id if name lookup failed
-  project_id="$(openstack token issue -f value -c project_id 2>/dev/null || true)"
-  project_name="$(openstack project show -f value -c name "$project_id" 2>/dev/null || true)"
+  raw_token_project_id="$(openstack token issue -f value -c project_id 2>/dev/null || true)"
+  project_id="$(sanitize_project_value "$raw_token_project_id")"
+  raw_fallback_project_name="$(openstack project show -f value -c name "$project_id" 2>/dev/null || true)"
+  project_name="$(sanitize_project_value "$raw_fallback_project_name")"
 fi
 
 log "current project: name=${project_name:-unknown} id=${project_id:-unknown}"
 
 if [[ "${project_name:-}" != "$EXPECTED_PROJECT_NAME" ]]; then
+  warn "project mismatch debug: expected_project=$(quote_for_log "$EXPECTED_PROJECT_NAME")"
+  warn "project mismatch debug: actual_parsed_project=$(quote_for_log "${project_name:-}")"
+  warn "project mismatch debug: raw_project_name_output=$(quote_for_log "$raw_project_name")"
+  warn "project mismatch debug: raw_project_id_output=$(quote_for_log "$raw_project_id")"
+  if [[ -n "$raw_token_project_id" ]]; then
+    warn "project mismatch debug: raw_token_project_id_output=$(quote_for_log "$raw_token_project_id")"
+  fi
+  if [[ -n "$raw_fallback_project_name" ]]; then
+    warn "project mismatch debug: raw_fallback_project_name_output=$(quote_for_log "$raw_fallback_project_name")"
+  fi
   die "project name mismatch: expected=$EXPECTED_PROJECT_NAME got=${project_name:-unknown}"
 fi
 
