@@ -77,8 +77,20 @@ imagectl_runtime_sync_to_remote() {
 }
 
 imagectl_runtime_validate_remote_for_full_pipeline() {
+  local rel=""
+  local src=""
+  local rel_q=""
   local guest_rel="deploy/local/guest-access.env"
   local guest_q=""
+
+  while IFS= read -r rel; do
+    [[ -n "$rel" ]] || continue
+    src="$IMAGECTL_REPO_ROOT/$rel"
+    if [[ -f "$src" ]]; then
+      rel_q="$(printf '%q' "$rel")"
+      imagectl_run_remote_repo_cmd "set -euo pipefail; f=$rel_q; [[ -f \"\$f\" ]] || { echo \"missing remote runtime config file: \$PWD/\$f (sync failed or file missing locally)\" >&2; exit 1; }"
+    fi
+  done < <(imagectl_runtime_config_items)
 
   guest_q="$(printf '%q' "$guest_rel")"
   imagectl_run_remote_repo_cmd "set -euo pipefail; \
@@ -86,7 +98,7 @@ f=$guest_q; \
 [[ -f \"\$f\" ]] || { echo \"missing remote runtime config file: \$PWD/\$f\" >&2; exit 1; }; \
 # shellcheck disable=SC1090 \
 source \"\$f\"; \
-[[ -n \"\${ROOT_PASSWORD:-}\" ]] || { echo \"missing remote runtime value ROOT_PASSWORD in \$PWD/\$f\" >&2; exit 1; }"
+[[ -n \"\${ROOT_PASSWORD:-}\" ]] || { echo \"missing remote runtime value ROOT_PASSWORD in \$PWD/\$f (set deploy/local/guest-access.env locally and rerun)\" >&2; exit 1; }"
 }
 
 imagectl_runtime_prepare_for_full_pipeline() {
