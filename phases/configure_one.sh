@@ -636,17 +636,59 @@ cleanup_success_artifacts() {
   rm -rf "$BACKUP_DIR" 2>/dev/null || true
 }
 
+normalize_text() {
+  local raw="${1:-}"
+  raw="${raw//$'\r'/}"
+  raw="${raw#"${raw%%[![:space:]]*}"}"
+  raw="${raw%"${raw##*[![:space:]]}"}"
+  printf '%s' "$raw"
+}
+
+read_current_timezone() {
+  local tz=""
+
+  tz="$(timedatectl show -p Timezone --value 2>/dev/null || true)"
+  tz="$(normalize_text "$tz")"
+  if [[ -n "$tz" ]]; then
+    printf '%s' "$tz"
+    return 0
+  fi
+
+  tz="$(timedatectl 2>/dev/null | awk -F': ' '/^[[:space:]]*Time zone:/ {print $2; exit}' | awk '{print $1}' || true)"
+  tz="$(normalize_text "$tz")"
+  if [[ -n "$tz" ]]; then
+    printf '%s' "$tz"
+    return 0
+  fi
+
+  if [[ -L /etc/localtime ]]; then
+    tz="$(readlink /etc/localtime 2>/dev/null || true)"
+    tz="$(normalize_text "$tz")"
+    tz="${tz#*/usr/share/zoneinfo/}"
+    if [[ -n "$tz" ]]; then
+      printf '%s' "$tz"
+      return 0
+    fi
+  fi
+
+  printf '%s' ""
+}
+
 validate_state() {
   cloud-init status || true
   install -d -m 755 /run/sshd
 
   local sshd_effective
+  local current_timezone expected_timezone
   sshd_effective="$(sshd -T)"
+  current_timezone="$(read_current_timezone)"
+  expected_timezone="$(normalize_text "$TIMEZONE")"
   grep -qi '^permitrootlogin yes$' <<<"$sshd_effective"
   grep -qi '^passwordauthentication yes$' <<<"$sshd_effective"
   grep -qi '^pubkeyauthentication yes$' <<<"$sshd_effective"
   grep -q '^LANG=en_US.UTF-8' /etc/default/locale
-  test "$(timedatectl show -p Timezone --value 2>/dev/null || true)" = "$TIMEZONE"
+  [[ -n "$current_timezone" ]] || { echo "cannot detect timezone from timedatectl or /etc/localtime" >&2; exit 1; }
+  test "$current_timezone" = "$expected_timezone"
   test -f /var/lib/cloud/scripts/per-instance/10-root-authorized-keys.sh
 
   if [[ -f /etc/ssh/sshd_config.d/99-phase2-root.conf ]]; then
@@ -658,6 +700,7 @@ validate_state() {
 
   log "validation summary"
   log "ssh config strategy: $SSH_CONFIG_STRATEGY"
+  log "timezone detected: $current_timezone (expected: $expected_timezone)"
   cloud-init status || true
   if [[ -d /etc/ssh/sshd_config.d ]]; then
     find /etc/ssh/sshd_config.d -maxdepth 1 -type f -name '*.conf' -printf '%f\n' | sort || true
