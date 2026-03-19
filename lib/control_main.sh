@@ -39,6 +39,31 @@ imagectl_phase_requires_version() {
   esac
 }
 
+imagectl_phase_is_mutating() {
+  local phase="$1"
+  case "$phase" in
+    import|create|configure|clean|publish) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+imagectl_assert_version_in_manifest_remote() {
+  local os="$1"
+  local version="$2"
+  local v=""
+  local found="no"
+  local -a versions=()
+
+  mapfile -t versions < <(imagectl_require_versions_from_manifest_remote "$os")
+  for v in "${versions[@]}"; do
+    if [[ "$v" == "$version" ]]; then
+      found="yes"
+      break
+    fi
+  done
+  [[ "$found" == "yes" ]] || imagectl_die "version '$version' was not discovered in manifest for os '$os'"
+}
+
 imagectl_run_phase_remote() {
   local os="$1"
   local phase="$2"
@@ -95,8 +120,9 @@ imagectl_manual_menu_once() {
     preflight|import|create|configure|clean|publish)
       if imagectl_phase_requires_version "$action"; then
         [[ -n "$version" ]] || imagectl_die "version is required for action '$action'"
+        imagectl_assert_version_in_manifest_remote "$os" "$version"
       fi
-      if [[ "$action" == "create" || "$action" == "configure" || "$action" == "publish" ]]; then
+      if imagectl_phase_is_mutating "$action"; then
         imagectl_runtime_prepare_for_action "$action"
       fi
       imagectl_run_phase_remote "$os" "$action" "$version"
@@ -161,6 +187,8 @@ imagectl_manual() {
     fi
     if imagectl_phase_requires_version "$action"; then
       [[ -n "$version" ]] || imagectl_die "--version is required for action '$action'"
+      imagectl_run_discover_for_os "$os"
+      imagectl_assert_version_in_manifest_remote "$os" "$version"
     fi
     imagectl_manual_menu_once "$os" "$version" "$action"
     return 0

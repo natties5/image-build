@@ -29,17 +29,25 @@ sanitize_project_value() {
   cleaned="$(
     printf '%s\n' "$raw" | awk '
       {
+        gsub(/\033\[[0-9;]*[A-Za-z]/, "", $0)
         gsub(/\r/, "", $0)
         gsub(/^[[:space:]]+/, "", $0)
         gsub(/[[:space:]]+$/, "", $0)
+        while ($0 ~ /^\[[^][]+\][[:space:]]*/) {
+          sub(/^\[[^][]+\][[:space:]]*/, "", $0)
+        }
+        if ($0 ~ /^project_name[[:space:]]*[:=][[:space:]]*/) {
+          sub(/^project_name[[:space:]]*[:=][[:space:]]*/, "", $0)
+        }
+        if ($0 ~ /^name[[:space:]]*[:=][[:space:]]*/) {
+          sub(/^name[[:space:]]*[:=][[:space:]]*/, "", $0)
+        }
       }
       length($0) {
         print
         exit
       }'
   )"
-  cleaned="${cleaned%%[[:space:]]*}"
-  cleaned="${cleaned%%\[*}"
   printf '%s' "$cleaned"
 }
 
@@ -83,16 +91,29 @@ source "$OPENRC_FILE"
 log "openrc sourced: $OPENRC_FILE"
 openstack token issue >/dev/null
 
-raw_project_name="$(openstack project show -f value -c name "$OS_PROJECT_NAME" 2>/dev/null || true)"
-raw_project_id="$(openstack project show -f value -c id "$OS_PROJECT_NAME" 2>/dev/null || true)"
-project_name="$(sanitize_project_value "$raw_project_name")"
-project_id="$(sanitize_project_value "$raw_project_id")"
-raw_token_project_id=""
+raw_token_project_id="$(openstack token issue -f value -c project_id 2>/dev/null || true)"
+project_id="$(sanitize_project_value "$raw_token_project_id")"
+
+raw_project_name=""
+raw_project_id=""
 raw_fallback_project_name=""
-if [[ -z "$project_name" || -z "$project_id" ]]; then
-  # fallback to token project id if name lookup failed
-  raw_token_project_id="$(openstack token issue -f value -c project_id 2>/dev/null || true)"
-  project_id="$(sanitize_project_value "$raw_token_project_id")"
+project_name=""
+
+if [[ -n "$project_id" ]]; then
+  raw_project_name="$(openstack project show -f value -c name "$project_id" 2>/dev/null || true)"
+  project_name="$(sanitize_project_value "$raw_project_name")"
+fi
+
+if [[ -z "$project_name" ]]; then
+  raw_project_name="$(openstack project show -f value -c name "$OS_PROJECT_NAME" 2>/dev/null || true)"
+  raw_project_id="$(openstack project show -f value -c id "$OS_PROJECT_NAME" 2>/dev/null || true)"
+  project_name="$(sanitize_project_value "$raw_project_name")"
+  if [[ -z "$project_id" ]]; then
+    project_id="$(sanitize_project_value "$raw_project_id")"
+  fi
+fi
+
+if [[ -z "$project_name" && -n "$project_id" ]]; then
   raw_fallback_project_name="$(openstack project show -f value -c name "$project_id" 2>/dev/null || true)"
   project_name="$(sanitize_project_value "$raw_fallback_project_name")"
 fi
@@ -100,8 +121,8 @@ fi
 log "current project: name=${project_name:-unknown} id=${project_id:-unknown}"
 
 if [[ "${project_name:-}" != "$EXPECTED_PROJECT_NAME" ]]; then
-  warn "project mismatch debug: expected_project=$(quote_for_log "$EXPECTED_PROJECT_NAME")"
-  warn "project mismatch debug: actual_parsed_project=$(quote_for_log "${project_name:-}")"
+  warn "project mismatch debug: expected_project_normalized=$(quote_for_log "$EXPECTED_PROJECT_NAME")"
+  warn "project mismatch debug: actual_project_normalized=$(quote_for_log "${project_name:-}")"
   warn "project mismatch debug: raw_project_name_output=$(quote_for_log "$raw_project_name")"
   warn "project mismatch debug: raw_project_id_output=$(quote_for_log "$raw_project_id")"
   if [[ -n "$raw_token_project_id" ]]; then

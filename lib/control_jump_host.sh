@@ -7,6 +7,14 @@ imagectl_default_repo_url() {
   printf '%s' "$origin_url"
 }
 
+imagectl_trim_value() {
+  local value="${1:-}"
+  value="${value//$'\r'/}"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
 imagectl_load_jump_host_config() {
   local tracked_file="$IMAGECTL_REPO_ROOT/deploy/control.env.example"
   local local_file="$IMAGECTL_REPO_ROOT/deploy/local/control.env"
@@ -31,6 +39,18 @@ imagectl_load_jump_host_config() {
   JUMP_HOST_REPO_URL="${JUMP_HOST_REPO_URL:-$(imagectl_default_repo_url)}"
   JUMP_MODE_DEFAULT="${JUMP_MODE_DEFAULT:-manual}"
   EXPECTED_PROJECT_NAME="${EXPECTED_PROJECT_NAME:-}"
+
+  JUMP_SSH_CONFIG_FILE="$(imagectl_trim_value "$JUMP_SSH_CONFIG_FILE")"
+  JUMP_SSH_KEY_FILE="$(imagectl_trim_value "$JUMP_SSH_KEY_FILE")"
+  JUMP_HOST_ALIAS="$(imagectl_trim_value "$JUMP_HOST_ALIAS")"
+  JUMP_HOST_USER="$(imagectl_trim_value "$JUMP_HOST_USER")"
+  JUMP_HOST_ADDR="$(imagectl_trim_value "$JUMP_HOST_ADDR")"
+  JUMP_HOST_PORT="$(imagectl_trim_value "$JUMP_HOST_PORT")"
+  JUMP_HOST_REPO_PATH="$(imagectl_trim_value "$JUMP_HOST_REPO_PATH")"
+  JUMP_HOST_BRANCH="$(imagectl_trim_value "$JUMP_HOST_BRANCH")"
+  JUMP_HOST_REPO_URL="$(imagectl_trim_value "$JUMP_HOST_REPO_URL")"
+  JUMP_MODE_DEFAULT="$(imagectl_trim_value "$JUMP_MODE_DEFAULT")"
+  EXPECTED_PROJECT_NAME="$(imagectl_trim_value "$EXPECTED_PROJECT_NAME")"
 
   [[ -n "$JUMP_HOST_REPO_PATH" ]] || imagectl_die "JUMP_HOST_REPO_PATH is empty. Set deploy/local/control.env"
   [[ -n "$JUMP_HOST_BRANCH" ]] || imagectl_die "JUMP_HOST_BRANCH is empty. Set deploy/local/control.env"

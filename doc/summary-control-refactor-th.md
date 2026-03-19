@@ -1,75 +1,76 @@
-# สรุปการแก้บั๊ก Runtime Config Sync (สำหรับ Operator)
+# สรุปการแก้ Controller ให้ใช้งาน Ubuntu 24.04 แบบ End-to-End
 
-## บั๊กคืออะไร
+## ปัญหาที่พังก่อนแก้
+- Controller มีจุดที่ยังหลุดเงื่อนไข ทำให้ flow ใช้งานจริงสะดุดแม้เมนูหลักดูครบ
+- Manual แบบระบุ `--action` และ `--version` สามารถหลุดการตรวจว่าเวอร์ชันมีใน manifest จริง
+- Runtime config ตรวจไม่ครบ ทำให้บางเคสไปพังช้าใน phase ที่มี side effect แล้ว
+- ค่าจากไฟล์ local บางตัวมีอักขระปน (เช่น CRLF) ทำให้ `git sync-safe` บน jump host ล้มเหลว
+- การ parse project name ใน preflight มีความเสี่ยงปน log/noise แล้วเทียบชื่อคลาดเคลื่อน
 
-จากการรันจริงใน `Pipeline -> Auto by OS -> ubuntu` พบว่า:
+## Regression ที่แก้แล้ว
+- เพิ่มการบังคับตรวจเวอร์ชันจาก manifest สำหรับทุก phase ที่ต้องใช้ version (`import/create/configure/clean/publish`)
+- ปรับ Manual direct action ให้ run discover ก่อนเมื่อ action นั้นต้องใช้ version
+- เพิ่ม runtime validation แบบชัดเจน (local + remote + phase mutating) ให้ fail เร็วก่อน phase ที่แก้ทรัพยากร
+- เพิ่ม runtime overlay sync ที่เติมค่า default ที่พิสูจน์แล้วเมื่อค่า local ว่าง
+- sanitize ค่า jump-host config ตอนโหลด เพื่อตัด `\r`/space ปลายบรรทัด
+- harden preflight project-name parsing ให้ตัด ANSI/log-prefix และเทียบค่า normalized แบบตรงตัว
 
-- `download/discover` ผ่าน
-- `preflight` ผ่าน
-- `import` ผ่าน
-- `create` ล้มเหลวด้วย `ERROR: ROOT_PASSWORD is empty`
+## Flow สุดท้าย (ใช้งานจริง)
+- Main menu คงเดิม: `SSH`, `Git`, `Pipeline`, `Exit`
+- Pipeline menu คงเดิม: `Manual`, `Auto by OS`, `Auto by OS Version`, `Status`, `Logs`, `Back`
+- ลำดับที่ถูกต้อง:
+  1. เตรียม remote repo
+  2. download/discover
+  3. อ่าน version จาก manifest/summary
+  4. ตรวจ/เลือก version
+  5. ค่อยรัน phase
 
-## ทำไมถึงเกิด
-
-Controller เดิม bootstrap/sync เฉพาะโค้ด repo บน jump host ผ่าน git
-แต่ไฟล์ local-only ใต้ `deploy/local/` เป็น gitignored จึงไม่ถูก clone/sync ไปที่ jump host
-
-phase บน remote จะ `source` ค่าใน `deploy/local/*.env` (เช่น `guest-access.env`)
-เมื่อไฟล์นี้ไม่มีบน jump host ค่า `ROOT_PASSWORD` จึงว่าง แล้ว fail ตอน `create`
-
-## แก้อะไรไปแล้ว
-
-1. เพิ่มแนวคิด **remote runtime config sync** ใน controller
-2. เพิ่มการตรวจสอบ dependency ก่อน phase ที่เปลี่ยนระบบ (mutating phases)
-3. เพิ่มการ sync ไฟล์ runtime config ที่จำเป็นจาก local ไป remote อย่างจำกัดและปลอดภัย
-4. เพิ่มการตรวจสอบฝั่ง remote หลัง sync ว่าไฟล์/ค่าจำเป็นมีจริงก่อนรัน pipeline ต่อ
-
-## ตอนนี้ sync อะไรไป jump host บ้าง
-
-Controller จะ sync เฉพาะไฟล์ runtime config ที่จำเป็น (ถ้ามีไฟล์นั้นใน local):
-
+## Runtime Config Sync ที่ใช้งานจริง
+ไฟล์ที่ sync ไป jump host (เฉพาะ whitelist):
 - `deploy/local/guest-access.env`
 - `deploy/local/openstack.env`
 - `deploy/local/openrc.path`
 - `deploy/local/publish.env`
 - `deploy/local/clean.env`
 
-ปลายทางบน jump host:
-
-- `<JUMP_HOST_REPO_PATH>/deploy/local/`
-
-## อะไรที่ยัง local-only และจะไม่ถูก copy เด็ดขาด
-
+สิ่งที่ **ไม่คัดลอกเด็ดขาด**:
 - `deploy/local/ssh_config`
-- `deploy/local/ssh/*` (private keys)
+- private key ใต้ `deploy/local/ssh/*`
 
-Controller ไม่ sync SSH private key และไม่ sync local SSH config ไป jump host
+ค่า default ที่เติมเมื่อค่าว่าง:
+- `EXPECTED_PROJECT_NAME=natties_op`
+- `OPENRC_FILE=/root/openrc-nut`
+- `ROOT_USER=root`
+- `ROOT_PASSWORD=mis@Pass01`
+- `NETWORK_ID=PUBLIC2956`
+- `FLAVOR_ID=2-2-0`
+- `SECURITY_GROUP=allow-any`
+- `VOLUME_TYPE=cinder`
+- `VOLUME_SIZE_GB=10`
 
-## พฤติกรรมใหม่ของ flow
+หมายเหตุ: default ถูกใช้ใน runtime overlay ที่ sync เท่านั้น ไม่ได้เขียนลงไฟล์ tracked
 
-### Auto by OS
+## วิธีใช้หลักสำหรับ Operator
+### Git
+- `bash scripts/control.sh git bootstrap`
+- `bash scripts/control.sh git sync-safe`
+- `bash scripts/control.sh git sync-code-overwrite --yes`
+- `bash scripts/control.sh git sync-clean --yes`
+- `bash scripts/control.sh git status`
+- `bash scripts/control.sh git branch`
 
-ก่อนเริ่มรัน phase แบบเต็ม Controller จะ:
+### Manual (Ubuntu 24.04)
+- โหมดเมนู: `bash scripts/control.sh pipeline manual`
+- โหมด direct:
+  - `bash scripts/control.sh pipeline manual --os ubuntu --action import --version 24.04`
 
-1. validate local runtime config (รวม `ROOT_PASSWORD`)
-2. sync runtime config ที่จำเป็นไป jump host
-3. validate ฝั่ง remote ว่าไฟล์/ค่าจำเป็นพร้อม
-4. ค่อยเริ่ม phase pipeline (`preflight -> import -> create -> configure -> clean -> publish`)
+### Auto by OS Version (Ubuntu 24.04)
+- `bash scripts/control.sh pipeline auto-by-os-version --os ubuntu --version 24.04`
 
-ผลคือ ถ้า `ROOT_PASSWORD` หาย จะ fail ก่อน `import` ไม่ใช่ไปรันสร้าง resource ก่อนแล้วค่อยพัง
+## สถานะการรองรับ OS
+- Implemented จริง: `ubuntu`
+- Skeleton / not implemented: `debian`, `centos`, `almalinux`, `rocky`
 
-### Auto by OS Version
-
-ใช้หลักเดียวกัน: validate local -> sync -> validate remote -> แล้วค่อยรัน full pipeline ของเวอร์ชันที่เลือก
-
-### Manual
-
-สำหรับ action ที่ต้องใช้ guest access (`create`, `configure`) Controller จะ validate+sync ก่อนรัน
-ถ้าค่าจำเป็นหาย จะแจ้งชัดเจนว่าไฟล์/ค่าที่ขาดคืออะไรและต้องแก้ที่ไหน
-
-## วิธีใช้งานสำหรับ Operator
-
-1. กรอกไฟล์ local-only ให้ครบ โดยเฉพาะ `deploy/local/guest-access.env` และ `ROOT_PASSWORD`
-2. ใช้ flow ปกติผ่าน `scripts/control.sh` (SSH/Git/Pipeline)
-3. Controller จะจัดการ validate/sync runtime config อัตโนมัติก่อน phase ที่จำเป็น
-4. ถ้าขึ้น error ว่าขาดไฟล์/ค่า ให้แก้ใน `deploy/local/*.env` ฝั่ง local แล้วรันใหม่
+## ข้อจำกัดที่ยังมี
+- หาก infrastructure บังคับให้บางฟิลด์ต้องเป็น UUID เท่านั้น (ไม่รับชื่อ) ต้องระบุ UUID ให้ชัดเจนใน config นั้นโดยตรง
+- pipeline จริงยังขึ้นกับสภาพแวดล้อม OpenStack และ resource quota ฝั่งใช้งาน
