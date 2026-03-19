@@ -103,6 +103,52 @@ wait_for_volume_status() {
   done
 }
 
+wait_for_volume_deletable() {
+  local timeout_sec="${1:-900}" interval_sec="${2:-5}" st start now
+  start="$(date +%s)"
+  while true; do
+    if ! volume_exists; then
+      return 0
+    fi
+    st="$(volume_status)"
+    case "$st" in
+      available|error|error_restoring|error_extending|error_managing)
+        return 0
+        ;;
+      deleting)
+        return 0
+        ;;
+      *)
+        now="$(date +%s)"
+        (( now - start >= timeout_sec )) && {
+          log "skip: timeout waiting for volume deletable state id=$VOLUME_ID last_status=${st:-unknown}"
+          return 1
+        }
+        sleep "$interval_sec"
+        ;;
+    esac
+  done
+}
+
+delete_volume_with_retry() {
+  local attempts="${1:-3}" i=1
+  while (( i <= attempts )); do
+    if ! volume_exists; then
+      return 0
+    fi
+    if ! wait_for_volume_deletable 900 5; then
+      return 1
+    fi
+    if openstack volume delete "$VOLUME_ID"; then
+      return 0
+    fi
+    log "retry: volume delete failed (attempt=$i/$attempts) id=$VOLUME_ID status=$(volume_status)"
+    sleep 10
+    i=$((i + 1))
+  done
+  return 1
+}
+
 wait_for_image_status() {
   local image_id="$1" desired="$2" timeout_sec="$3" interval_sec="$4" st start now
   start="$(date +%s)"
@@ -170,7 +216,7 @@ EOF
 cleanup_sources() {
   if [[ "$DELETE_VOLUME_AFTER_PUBLISH" == "yes" ]] && volume_exists; then
     log "deleting volume id=$VOLUME_ID"
-    openstack volume delete "$VOLUME_ID" || true
+    delete_volume_with_retry 6 || log "skip: failed to delete volume id=$VOLUME_ID after retries"
   fi
   if [[ "$DELETE_BASE_IMAGE_AFTER_PUBLISH" == "yes" ]] && image_exists "$BASE_IMAGE_ID"; then
     log "deleting base image id=$BASE_IMAGE_ID"
