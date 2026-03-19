@@ -12,7 +12,7 @@ Top-level sections:
 
 1. SSH
 2. Git
-3. Script
+3. Pipeline
 4. Exit
 
 ## SSH Menu
@@ -57,30 +57,38 @@ bash scripts/control.sh git status
 bash scripts/control.sh git branch
 ```
 
-## Script Menu
+## Pipeline Menu
 
-- `manual`
-- `auto`
-- `status`
-- `logs`
-- `back`
+- `Manual`
+- `Auto by OS`
+- `Auto by OS Version`
+- `Status`
+- `Logs`
+- `Back`
 
-Script actions automatically require remote repo readiness; if missing, controller offers bootstrap.
+Pipeline execution always uses dependency-aware order:
+
+1. Select OS
+2. Ensure remote repo exists
+3. Run `download/discover`
+4. Load discovered versions from manifest/summary
+5. Continue with selected mode
+
+Version choices are manifest-driven. If no manifest versions are found, run discover first.
 
 ### Manual Mode
 
 Flow:
 
 1. Select OS
-2. Select version
-3. Select phase/action
-4. Action runs
-5. Return to same menu
+2. Controller runs discover first
+3. Select one discovered version
+4. Select action
+5. Action runs and returns to same menu
 
 Actions:
 
 - `preflight`
-- `download`
 - `import`
 - `create`
 - `configure`
@@ -92,20 +100,52 @@ Actions:
 - `change-os`
 - `back`
 
-### Auto Mode
+### Auto by OS
 
-Run:
+Flow:
+
+1. Select OS
+2. Controller runs discover first
+3. Load all discovered versions
+4. Run full pipeline (`preflight -> import -> create -> configure -> clean -> publish`) for each version
+5. Show per-version summary
+
+### Auto by OS Version
+
+Flow:
+
+1. Select OS
+2. Controller runs discover first
+3. Load discovered versions
+4. Select one discovered version
+5. Run full pipeline for that version
+6. Show summary
+
+Direct commands:
 
 ```bash
-bash scripts/control.sh script auto --os ubuntu --version 24.04
+bash scripts/control.sh pipeline manual
+bash scripts/control.sh pipeline auto-by-os --os ubuntu
+bash scripts/control.sh pipeline auto-by-os-version --os ubuntu --version 24.04
 ```
 
-Scaffold flags:
+Compatibility aliases:
 
-- `--resume-from <phase>`
-- `--stop-before <phase>`
-- `--fail-fast yes|no`
-- `--cleanup-mode <value>`
+```bash
+bash scripts/control.sh script manual
+bash scripts/control.sh script auto --os ubuntu --version 24.04
+bash scripts/control.sh auto --os ubuntu --version 24.04
+```
+
+## EXPECTED_PROJECT_NAME for Preflight
+
+Set `EXPECTED_PROJECT_NAME` in one of:
+
+- `deploy/local/control.env`
+- `deploy/local/openstack.env`
+- shell environment before running the command
+
+Controller-based preflight runs pass this value automatically.
 
 ## Local-Only Jump-Host Files
 

@@ -30,6 +30,7 @@ imagectl_load_jump_host_config() {
   JUMP_HOST_BRANCH="${JUMP_HOST_BRANCH:-main}"
   JUMP_HOST_REPO_URL="${JUMP_HOST_REPO_URL:-$(imagectl_default_repo_url)}"
   JUMP_MODE_DEFAULT="${JUMP_MODE_DEFAULT:-manual}"
+  EXPECTED_PROJECT_NAME="${EXPECTED_PROJECT_NAME:-}"
 
   [[ -n "$JUMP_HOST_REPO_PATH" ]] || imagectl_die "JUMP_HOST_REPO_PATH is empty. Set deploy/local/control.env"
   [[ -n "$JUMP_HOST_BRANCH" ]] || imagectl_die "JUMP_HOST_BRANCH is empty. Set deploy/local/control.env"

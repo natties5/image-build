@@ -41,6 +41,38 @@ imagectl_version_list_for_os() {
   fi
 }
 
+imagectl_summary_relpath_for_os() {
+  local os="$1"
+  case "$os" in
+    ubuntu) printf '%s' "manifests/ubuntu/ubuntu-auto-discover-summary.tsv" ;;
+    *) return 1 ;;
+  esac
+}
+
+imagectl_version_list_for_os_remote() {
+  local os="$1"
+  local summary_rel=""
+  local summary_q=""
+
+  summary_rel="$(imagectl_summary_relpath_for_os "$os")" || return 0
+  summary_q="$(printf '%q' "$summary_rel")"
+  imagectl_run_remote_repo_cmd "set -euo pipefail; f=$summary_q; if [[ -f \"\$f\" ]]; then awk -F \$'\\t' 'NR>1 && \$1 != \"\" && !seen[\$1]++ {print \$1}' \"\$f\"; fi"
+}
+
+imagectl_require_versions_from_manifest_remote() {
+  local os="$1"
+  local -a versions=()
+  if ! imagectl_os_is_implemented "$os"; then
+    imagectl_die "os '$os' is not implemented yet"
+  fi
+
+  mapfile -t versions < <(imagectl_version_list_for_os_remote "$os")
+  if [[ "${#versions[@]}" -eq 0 ]]; then
+    imagectl_die "no discovered versions found in manifest for os '$os'. Run download/discover first."
+  fi
+  printf '%s\n' "${versions[@]}"
+}
+
 imagectl_phase_command_for_ubuntu() {
   local phase="$1"
   local version="$2"

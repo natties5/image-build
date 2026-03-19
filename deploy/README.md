@@ -14,3 +14,4 @@ Optional:
 
 - Set `JUMP_HOST_REPO_URL` in `deploy/local/control.env`.
 - If empty, controller defaults to local `origin` URL.
+- Set `EXPECTED_PROJECT_NAME` in `deploy/local/control.env` (or `deploy/local/openstack.env`) so preflight can validate project context automatically.

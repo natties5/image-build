@@ -6,11 +6,18 @@ This repository is a VS Code-friendly, jump-host-driven image build framework.
 
 Use `scripts/control.sh` for operator workflows:
 
-- `bash scripts/control.sh` (interactive main menu: SSH / Git / Script / Exit)
+- `bash scripts/control.sh` (interactive main menu: SSH / Git / Pipeline / Exit)
 - `bash scripts/control.sh ssh validate`
 - `bash scripts/control.sh git bootstrap`
+- `bash scripts/control.sh pipeline manual`
+- `bash scripts/control.sh pipeline auto-by-os --os ubuntu`
+- `bash scripts/control.sh pipeline auto-by-os-version --os ubuntu --version 24.04`
+
+Compatibility aliases remain supported:
+
 - `bash scripts/control.sh script manual`
 - `bash scripts/control.sh script auto --os ubuntu --version 24.04`
+- `bash scripts/control.sh auto --os ubuntu --version 24.04`
 
 Legacy wrappers under `scripts/01..11_*.sh` and `bin/imagectl.sh` remain supported.
 
@@ -19,7 +26,8 @@ Legacy wrappers under `scripts/01..11_*.sh` and `bin/imagectl.sh` remain support
 1. Copy `deploy/control.env.example` to `deploy/local/control.env`.
 2. Copy `deploy/ssh_config.example` to `deploy/local/ssh_config`.
 3. Add private key at `deploy/local/ssh/id_jump`.
-4. Optional local overrides:
+4. Set `EXPECTED_PROJECT_NAME` in `deploy/local/control.env` (or `deploy/local/openstack.env`) for preflight checks.
+5. Optional local overrides:
    - `deploy/local/openstack.env`
    - `deploy/local/openrc.path`
    - `deploy/local/guest-access.env`
@@ -28,7 +36,7 @@ Legacy wrappers under `scripts/01..11_*.sh` and `bin/imagectl.sh` remain support
 
 `deploy/local/**` is gitignored by default.
 
-## SSH / Git / Script Sections
+## SSH / Git / Pipeline Sections
 
 - SSH:
   - `connect` opens a real SSH session to jump host.
@@ -38,9 +46,9 @@ Legacy wrappers under `scripts/01..11_*.sh` and `bin/imagectl.sh` remain support
   - `bootstrap` prepares remote repo safely if missing/empty.
   - `sync-safe`, `sync-code-overwrite`, `sync-clean`.
   - `status`, `branch`, optional `push`.
-- Script:
-  - `manual`, `auto`, `status`, `logs`.
-  - Script execution checks remote repo readiness and guides bootstrap.
+- Pipeline:
+  - `Manual`, `Auto by OS`, `Auto by OS Version`, `Status`, `Logs`.
+  - Controller enforces discover first, then manifest-driven version choices.
 
 ## Sync Modes
 

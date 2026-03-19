@@ -19,11 +19,6 @@ EXPECTED_IMAGE_PREFIX="${EXPECTED_IMAGE_PREFIX:-ubuntu-}"
 EXPECTED_SERVER_PREFIX="${EXPECTED_SERVER_PREFIX:-ubuntu-}"
 EXPECTED_VOLUME_PREFIX="${EXPECTED_VOLUME_PREFIX:-ubuntu-}"
 
-if [[ -z "$EXPECTED_PROJECT_NAME" ]]; then
-  echo "usage: EXPECTED_PROJECT_NAME=<name> $0" >&2
-  exit 1
-fi
-
 log(){ printf '[%s] %s\n' "$(date '+%F %T')" "$*"; }
 warn(){ log "WARN: $*"; }
 die(){ log "ERROR: $*"; exit 1; }
@@ -44,6 +39,11 @@ source "$OPENSTACK_ENV_FILE"
 source "$OPENRC_PATH_FILE"
 imagectl_source_local_overrides "$REPO_ROOT"
 imagectl_init_layout "$REPO_ROOT"
+
+if [[ -z "$EXPECTED_PROJECT_NAME" ]]; then
+  echo "EXPECTED_PROJECT_NAME is required (set in deploy/local/openstack.env or export in environment)" >&2
+  exit 1
+fi
 
 [[ -n "${OPENRC_FILE:-}" ]] || die "OPENRC_FILE is empty in $OPENRC_PATH_FILE"
 [[ -f "$OPENRC_FILE" ]] || die "openrc file not found: $OPENRC_FILE"

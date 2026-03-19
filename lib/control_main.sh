@@ -19,7 +19,8 @@ usage:
   scripts/control.sh
   scripts/control.sh ssh <connect|validate|info>
   scripts/control.sh git <bootstrap|sync-safe|sync-code-overwrite|sync-clean|status|branch|push> [--yes]
-  scripts/control.sh script <manual|auto|status|logs> [args]
+  scripts/control.sh pipeline <manual|auto-by-os|auto-by-os-version|status|logs> [args]
+  scripts/control.sh script <manual|auto|auto-by-os|auto-by-os-version|status|logs> [args]
   scripts/control.sh manual [args]
   scripts/control.sh auto [args]
   scripts/control.sh sync [--mode safe|code-overwrite|clean] [--yes]
@@ -28,13 +29,29 @@ usage:
 EOF
 }
 
+imagectl_phase_requires_version() {
+  local phase="$1"
+  case "$phase" in
+    import|create|configure|clean|publish) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 imagectl_run_phase_remote() {
   local os="$1"
   local phase="$2"
   local version="${3:-}"
   local cmd=""
+  local expected_q=""
+
   cmd="$(imagectl_phase_command "$os" "$phase" "$version")" || imagectl_die "phase '$phase' not available for os '$os'"
   imagectl_require_remote_repo_for_script
+
+  if [[ "$phase" == "preflight" && -n "${EXPECTED_PROJECT_NAME:-}" ]]; then
+    expected_q="$(printf '%q' "$EXPECTED_PROJECT_NAME")"
+    cmd="EXPECTED_PROJECT_NAME=$expected_q $cmd"
+  fi
+
   imagectl_log "run phase os=$os phase=$phase version=${version:-n/a}"
   imagectl_run_remote_repo_cmd "$cmd"
 }
@@ -45,19 +62,26 @@ imagectl_select_os_interactive() {
   imagectl_select_from_list "select OS" "${options[@]}"
 }
 
-imagectl_select_version_interactive() {
+imagectl_select_version_from_manifest_remote_interactive() {
   local os="$1"
   local versions=()
-  local selected=""
-  mapfile -t versions < <(imagectl_version_list_for_os "$os")
-  if [[ "${#versions[@]}" -gt 0 ]]; then
-    selected="$(imagectl_select_from_list "select version for $os" "${versions[@]}")"
-    printf '%s' "$selected"
-    return 0
+  mapfile -t versions < <(imagectl_require_versions_from_manifest_remote "$os")
+  imagectl_select_from_list "select version for $os" "${versions[@]}"
+}
+
+imagectl_prepare_remote_pipeline_context() {
+  imagectl_load_jump_host_config
+  imagectl_check_remote_connection >/dev/null
+  imagectl_require_remote_repo_for_script
+}
+
+imagectl_run_discover_for_os() {
+  local os="$1"
+  if ! imagectl_os_is_implemented "$os"; then
+    imagectl_die "os '$os' is not implemented yet"
   fi
-  read -r -p "enter version for $os (example 24.04): " selected
-  [[ -n "$selected" ]] || imagectl_die "version is required"
-  printf '%s' "$selected"
+  imagectl_log "run download/discover for os=$os"
+  imagectl_run_phase_remote "$os" download
 }
 
 imagectl_manual_menu_once() {
@@ -66,12 +90,14 @@ imagectl_manual_menu_once() {
   local action="$3"
 
   case "$action" in
-    preflight|download|import|create|configure|clean|publish)
-      if ! imagectl_os_is_implemented "$os"; then
-        imagectl_log "os '$os' is not implemented yet"
-        return 0
+    preflight|import|create|configure|clean|publish)
+      if imagectl_phase_requires_version "$action"; then
+        [[ -n "$version" ]] || imagectl_die "version is required for action '$action'"
       fi
       imagectl_run_phase_remote "$os" "$action" "$version"
+      ;;
+    download)
+      imagectl_run_phase_remote "$os" download
       ;;
     status)
       imagectl_require_remote_repo_for_script
@@ -90,10 +116,20 @@ imagectl_manual_menu_once() {
 imagectl_manual_usage() {
   cat <<'EOF'
 usage:
+  scripts/control.sh pipeline manual
   scripts/control.sh script manual
   scripts/control.sh manual
   scripts/control.sh manual --os <name> --version <x.yz> --action <action>
 EOF
+}
+
+imagectl_manual_prepare_selection() {
+  local os="$1"
+  local selected_version=""
+
+  imagectl_run_discover_for_os "$os"
+  selected_version="$(imagectl_select_version_from_manifest_remote_interactive "$os")"
+  printf '%s' "$selected_version"
 }
 
 imagectl_manual() {
@@ -111,25 +147,28 @@ imagectl_manual() {
     esac
   done
 
-  imagectl_load_jump_host_config
-  imagectl_check_remote_connection >/dev/null
+  imagectl_prepare_remote_pipeline_context
 
   if [[ -n "$action" ]]; then
     os="$(imagectl_require_supported_os "${os:-ubuntu}")"
-    [[ -n "$version" ]] || imagectl_die "--version is required when --action is set"
+    if ! imagectl_os_is_implemented "$os"; then
+      imagectl_die "os '$os' is not implemented yet"
+    fi
+    if imagectl_phase_requires_version "$action"; then
+      [[ -n "$version" ]] || imagectl_die "--version is required for action '$action'"
+    fi
     imagectl_manual_menu_once "$os" "$version" "$action"
     return 0
   fi
 
   os="$(imagectl_select_os_interactive)"
   os="$(imagectl_require_supported_os "$os")"
-  version="$(imagectl_select_version_interactive "$os")"
+  version="$(imagectl_manual_prepare_selection "$os")"
 
   while true; do
     local choice=""
     choice="$(imagectl_select_from_list "manual mode: os=$os version=$version" \
       "preflight" \
-      "download" \
       "import" \
       "create" \
       "configure" \
@@ -142,12 +181,12 @@ imagectl_manual() {
       "back")"
     case "$choice" in
       change-version)
-        version="$(imagectl_select_version_interactive "$os")"
+        version="$(imagectl_select_version_from_manifest_remote_interactive "$os")"
         ;;
       change-os)
         os="$(imagectl_select_os_interactive)"
         os="$(imagectl_require_supported_os "$os")"
-        version="$(imagectl_select_version_interactive "$os")"
+        version="$(imagectl_manual_prepare_selection "$os")"
         ;;
       back)
         break
@@ -162,104 +201,149 @@ imagectl_manual() {
   done
 }
 
-imagectl_auto_usage() {
-  cat <<'EOF'
-usage:
-  scripts/control.sh script auto --os <name> --version <x.yz> [--stop-before <phase>] [--resume-from <phase>] [--fail-fast yes|no] [--cleanup-mode <value>]
-  scripts/control.sh auto --os <name> --version <x.yz> [--stop-before <phase>] [--resume-from <phase>] [--fail-fast yes|no] [--cleanup-mode <value>]
-EOF
+imagectl_auto_phase_list() {
+  printf '%s\n' preflight import create configure clean publish
 }
 
-imagectl_auto() {
-  local os=""
-  local version=""
-  local stop_before=""
-  local resume_from=""
-  local fail_fast="yes"
-  local cleanup_mode="default"
-  local phases=(preflight download import create configure clean publish)
-  local idx=0
-  local start_idx=0
-  local stop_idx=-1
-  local found_resume="no"
-  local found_stop="no"
+imagectl_auto_run_phase_sequence() {
+  local os="$1"
+  local version="$2"
+  local fail_fast="${3:-yes}"
+  local phases=()
+  local phase=""
 
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --os) os="${2:-}"; shift 2 ;;
-      --version) version="${2:-}"; shift 2 ;;
-      --stop-before) stop_before="${2:-}"; shift 2 ;;
-      --resume-from) resume_from="${2:-}"; shift 2 ;;
-      --fail-fast) fail_fast="${2:-}"; shift 2 ;;
-      --cleanup-mode) cleanup_mode="${2:-}"; shift 2 ;;
-      -h|--help) imagectl_auto_usage; return 0 ;;
-      *) imagectl_die "unknown auto argument: $1" ;;
-    esac
-  done
-
-  os="$(imagectl_require_supported_os "$os")"
-  [[ -n "$version" ]] || imagectl_die "--version is required"
-
-  if ! imagectl_os_is_implemented "$os"; then
-    imagectl_die "os '$os' is not implemented yet"
-  fi
-
-  imagectl_load_jump_host_config
-  imagectl_check_remote_connection >/dev/null
-  imagectl_require_remote_repo_for_script
-
-  if [[ -n "$resume_from" ]]; then
-    for idx in "${!phases[@]}"; do
-      if [[ "${phases[$idx]}" == "$resume_from" ]]; then
-        start_idx="$idx"
-        found_resume="yes"
-        break
-      fi
-    done
-    [[ "$found_resume" == "yes" ]] || imagectl_die "invalid --resume-from phase: $resume_from"
-  fi
-
-  if [[ -n "$stop_before" ]]; then
-    for idx in "${!phases[@]}"; do
-      if [[ "${phases[$idx]}" == "$stop_before" ]]; then
-        stop_idx="$idx"
-        found_stop="yes"
-        break
-      fi
-    done
-    [[ "$found_stop" == "yes" ]] || imagectl_die "invalid --stop-before phase: $stop_before"
-  fi
-
-  imagectl_log "auto start os=$os version=$version fail_fast=$fail_fast cleanup_mode=$cleanup_mode"
-  for idx in "${!phases[@]}"; do
-    if (( idx < start_idx )); then
-      continue
-    fi
-    if (( stop_idx >= 0 && idx >= stop_idx )); then
-      imagectl_log "auto stop-before reached phase=${phases[$idx]}"
-      break
-    fi
-    if ! imagectl_run_phase_remote "$os" "${phases[$idx]}" "$version"; then
-      imagectl_log "phase failed: ${phases[$idx]}"
+  mapfile -t phases < <(imagectl_auto_phase_list)
+  for phase in "${phases[@]}"; do
+    if ! imagectl_run_phase_remote "$os" "$phase" "$version"; then
+      imagectl_log "phase failed: $phase (os=$os version=$version)"
       if [[ "$fail_fast" == "yes" ]]; then
         return 1
       fi
     fi
   done
-  imagectl_log "auto done os=$os version=$version"
 }
 
-imagectl_script_status() {
-  imagectl_load_jump_host_config
-  imagectl_check_remote_connection >/dev/null
-  imagectl_require_remote_repo_for_script
+imagectl_auto_by_os_usage() {
+  cat <<'EOF'
+usage:
+  scripts/control.sh pipeline auto-by-os --os <name> [--fail-fast yes|no]
+  scripts/control.sh script auto-by-os --os <name> [--fail-fast yes|no]
+EOF
+}
+
+imagectl_auto_by_os() {
+  local os=""
+  local fail_fast="yes"
+  local versions=()
+  local -a results=()
+  local version=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --os) os="${2:-}"; shift 2 ;;
+      --fail-fast) fail_fast="${2:-}"; shift 2 ;;
+      -h|--help) imagectl_auto_by_os_usage; return 0 ;;
+      *) imagectl_die "unknown auto-by-os argument: $1" ;;
+    esac
+  done
+
+  imagectl_prepare_remote_pipeline_context
+
+  if [[ -z "$os" ]]; then
+    os="$(imagectl_select_os_interactive)"
+  fi
+  os="$(imagectl_require_supported_os "$os")"
+  if ! imagectl_os_is_implemented "$os"; then
+    imagectl_die "os '$os' is not implemented yet"
+  fi
+
+  imagectl_run_discover_for_os "$os"
+  mapfile -t versions < <(imagectl_require_versions_from_manifest_remote "$os")
+
+  imagectl_log "auto-by-os start os=$os discovered_versions=${#versions[@]} fail_fast=$fail_fast"
+  for version in "${versions[@]}"; do
+    if imagectl_auto_run_phase_sequence "$os" "$version" "$fail_fast"; then
+      results+=("$version:success")
+    else
+      results+=("$version:failed")
+      if [[ "$fail_fast" == "yes" ]]; then
+        break
+      fi
+    fi
+  done
+
+  imagectl_log "auto-by-os summary"
+  printf '%s\n' "${results[@]}" | sed 's/^/  /'
+}
+
+imagectl_auto_by_os_version_usage() {
+  cat <<'EOF'
+usage:
+  scripts/control.sh pipeline auto-by-os-version --os <name> [--version <x.yz>] [--fail-fast yes|no]
+  scripts/control.sh script auto --os <name> --version <x.yz> [--fail-fast yes|no]
+  scripts/control.sh auto --os <name> --version <x.yz> [--fail-fast yes|no]
+EOF
+}
+
+imagectl_auto_by_os_version() {
+  local os=""
+  local version=""
+  local fail_fast="yes"
+  local versions=()
+  local found="no"
+  local v=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --os) os="${2:-}"; shift 2 ;;
+      --version) version="${2:-}"; shift 2 ;;
+      --fail-fast) fail_fast="${2:-}"; shift 2 ;;
+      --stop-before|--resume-from|--cleanup-mode)
+        # kept for compatibility with previous interface; ignored in simplified flow
+        shift 2
+        ;;
+      -h|--help) imagectl_auto_by_os_version_usage; return 0 ;;
+      *) imagectl_die "unknown auto-by-os-version argument: $1" ;;
+    esac
+  done
+
+  imagectl_prepare_remote_pipeline_context
+
+  if [[ -z "$os" ]]; then
+    os="$(imagectl_select_os_interactive)"
+  fi
+  os="$(imagectl_require_supported_os "$os")"
+  if ! imagectl_os_is_implemented "$os"; then
+    imagectl_die "os '$os' is not implemented yet"
+  fi
+
+  imagectl_run_discover_for_os "$os"
+  mapfile -t versions < <(imagectl_require_versions_from_manifest_remote "$os")
+
+  if [[ -z "$version" ]]; then
+    version="$(imagectl_select_from_list "select version for auto-by-os-version (os=$os)" "${versions[@]}")"
+  else
+    for v in "${versions[@]}"; do
+      if [[ "$v" == "$version" ]]; then
+        found="yes"
+        break
+      fi
+    done
+    [[ "$found" == "yes" ]] || imagectl_die "version '$version' was not discovered in manifest for os '$os'"
+  fi
+
+  imagectl_log "auto-by-os-version start os=$os version=$version fail_fast=$fail_fast"
+  imagectl_auto_run_phase_sequence "$os" "$version" "$fail_fast"
+  imagectl_log "auto-by-os-version done os=$os version=$version"
+}
+
+imagectl_pipeline_status() {
+  imagectl_prepare_remote_pipeline_context
   imagectl_run_remote_repo_cmd "git status --short --branch && echo '--- logs ---' && ls -1 logs | tail -n 15"
 }
 
-imagectl_script_logs() {
-  imagectl_load_jump_host_config
-  imagectl_check_remote_connection >/dev/null
-  imagectl_require_remote_repo_for_script
+imagectl_pipeline_logs() {
+  imagectl_prepare_remote_pipeline_context
   imagectl_run_remote_repo_cmd "ls -1 logs | tail -n 30"
 }
 
@@ -293,23 +377,55 @@ imagectl_ssh_dispatch() {
   esac
 }
 
+imagectl_pipeline_usage() {
+  cat <<'EOF'
+usage:
+  scripts/control.sh pipeline <manual|auto-by-os|auto-by-os-version|status|logs> [args]
+
+compatibility aliases:
+  scripts/control.sh script <manual|auto|auto-by-os|auto-by-os-version|status|logs> [args]
+  scripts/control.sh auto --os <name> --version <x.yz>
+EOF
+}
+
+imagectl_pipeline_dispatch() {
+  local sub="${1:-}"
+  shift || true
+  case "$sub" in
+    manual) imagectl_manual "$@" ;;
+    auto-by-os) imagectl_auto_by_os "$@" ;;
+    auto-by-os-version) imagectl_auto_by_os_version "$@" ;;
+    auto) imagectl_auto_by_os_version "$@" ;;
+    status) imagectl_pipeline_status ;;
+    logs) imagectl_pipeline_logs ;;
+    ""|-h|--help|help) imagectl_pipeline_usage ;;
+    *) imagectl_die "unknown pipeline subcommand: $sub" ;;
+  esac
+}
+
 imagectl_script_usage() {
   cat <<'EOF'
 usage:
-  scripts/control.sh script <manual|auto|status|logs> [args]
+  scripts/control.sh script <manual|auto|auto-by-os|auto-by-os-version|status|logs> [args]
+
+note: 'script' is kept as a compatibility alias for 'pipeline'.
 EOF
 }
 
 imagectl_script_dispatch() {
   local sub="${1:-}"
   shift || true
+
   case "$sub" in
-    manual) imagectl_manual "$@" ;;
-    auto) imagectl_auto "$@" ;;
-    status) imagectl_script_status ;;
-    logs) imagectl_script_logs ;;
-    ""|-h|--help|help) imagectl_script_usage ;;
-    *) imagectl_die "unknown script subcommand: $sub" ;;
+    manual|auto|auto-by-os|auto-by-os-version|status|logs)
+      imagectl_pipeline_dispatch "$sub" "$@"
+      ;;
+    ""|-h|--help|help)
+      imagectl_script_usage
+      ;;
+    *)
+      imagectl_die "unknown script subcommand: $sub"
+      ;;
   esac
 }
 
@@ -351,22 +467,17 @@ imagectl_menu_git() {
   done
 }
 
-imagectl_menu_script() {
+imagectl_menu_pipeline() {
   while true; do
     local choice=""
-    choice="$(imagectl_select_from_list "Script menu" "manual" "auto" "status" "logs" "back")"
+    choice="$(imagectl_select_from_list "Pipeline menu" "Manual" "Auto by OS" "Auto by OS Version" "Status" "Logs" "Back")"
     case "$choice" in
-      manual) imagectl_script_dispatch manual ;;
-      auto)
-        local os version
-        os="$(imagectl_select_os_interactive)"
-        os="$(imagectl_require_supported_os "$os")"
-        version="$(imagectl_select_version_interactive "$os")"
-        imagectl_script_dispatch auto --os "$os" --version "$version"
-        ;;
-      status) imagectl_script_dispatch status ;;
-      logs) imagectl_script_dispatch logs ;;
-      back) break ;;
+      "Manual") imagectl_pipeline_dispatch manual ;;
+      "Auto by OS") imagectl_pipeline_dispatch auto-by-os ;;
+      "Auto by OS Version") imagectl_pipeline_dispatch auto-by-os-version ;;
+      "Status") imagectl_pipeline_dispatch status ;;
+      "Logs") imagectl_pipeline_dispatch logs ;;
+      "Back") break ;;
     esac
   done
 }
@@ -374,11 +485,11 @@ imagectl_menu_script() {
 imagectl_interactive_menu() {
   while true; do
     local choice=""
-    choice="$(imagectl_select_from_list "Main menu" "SSH" "Git" "Script" "Exit")"
+    choice="$(imagectl_select_from_list "Main menu" "SSH" "Git" "Pipeline" "Exit")"
     case "$choice" in
       SSH) imagectl_menu_ssh ;;
       Git) imagectl_menu_git ;;
-      Script) imagectl_menu_script ;;
+      Pipeline) imagectl_menu_pipeline ;;
       Exit) break ;;
     esac
   done
@@ -394,12 +505,13 @@ imagectl_control_main() {
     help|-h|--help) imagectl_control_usage ;;
     ssh) imagectl_ssh_dispatch "$@" ;;
     git) imagectl_git_dispatch "$@" ;;
+    pipeline) imagectl_pipeline_dispatch "$@" ;;
     script) imagectl_script_dispatch "$@" ;;
     sync) imagectl_sync "$@" ;;
-    manual) imagectl_script_dispatch manual "$@" ;;
-    auto) imagectl_script_dispatch auto "$@" ;;
-    status) imagectl_script_dispatch status ;;
-    logs) imagectl_script_dispatch logs ;;
+    manual) imagectl_pipeline_dispatch manual "$@" ;;
+    auto) imagectl_pipeline_dispatch auto "$@" ;;
+    status) imagectl_pipeline_dispatch status ;;
+    logs) imagectl_pipeline_dispatch logs ;;
     *)
       imagectl_control_usage
       imagectl_die "unknown command: $cmd"
