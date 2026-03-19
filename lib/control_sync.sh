@@ -27,6 +27,12 @@ imagectl_sync_require_confirmation() {
     return 0
   fi
   imagectl_is_tty || imagectl_die "destructive mode '$mode' requires --yes in non-interactive mode"
+  if [[ "$mode" == "code-overwrite" ]]; then
+    imagectl_log "about to reset tracked files to origin/$JUMP_HOST_BRANCH on jump host repo"
+  fi
+  if [[ "$mode" == "clean" ]]; then
+    imagectl_log "about to reset tracked files and clean runtime/work artifacts (cache,tmp,runtime/state,logs/*.log); deploy/local/** is protected"
+  fi
   imagectl_prompt_yes_no "confirm destructive sync mode: $mode" || imagectl_die "sync cancelled"
 }
 
@@ -89,13 +95,15 @@ imagectl_sync() {
     *) imagectl_die "invalid sync backend: $backend" ;;
   esac
 
-  imagectl_sync_require_confirmation "$mode" "$assume_yes"
   imagectl_load_jump_host_config
+  imagectl_check_remote_connection >/dev/null
+  imagectl_sync_require_confirmation "$mode" "$assume_yes"
 
   if [[ "$backend" == "push-local" ]]; then
     imagectl_die "sync backend 'push-local' is scaffolded but not implemented yet"
   fi
 
+  imagectl_bootstrap_remote_repo
   imagectl_log "sync start mode=$mode backend=$backend branch=$JUMP_HOST_BRANCH"
   imagectl_run_sync_remote_git "$mode"
   imagectl_log "sync done mode=$mode"

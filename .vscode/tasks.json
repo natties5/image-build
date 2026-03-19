@@ -8,39 +8,45 @@
       "problemMatcher": []
     },
     {
-      "label": "control: status",
+      "label": "control: menu",
       "type": "shell",
-      "command": "bash scripts/control.sh status",
+      "command": "bash scripts/control.sh",
       "problemMatcher": []
     },
     {
-      "label": "control: manual",
+      "label": "control: ssh validate",
       "type": "shell",
-      "command": "bash scripts/control.sh manual",
+      "command": "bash scripts/control.sh ssh validate",
       "problemMatcher": []
     },
     {
-      "label": "control: auto ubuntu",
+      "label": "control: git bootstrap",
       "type": "shell",
-      "command": "bash scripts/control.sh auto --os ubuntu --version 24.04",
+      "command": "bash scripts/control.sh git bootstrap",
       "problemMatcher": []
     },
     {
-      "label": "control: sync safe",
+      "label": "control: git sync safe",
       "type": "shell",
-      "command": "bash scripts/control.sh sync --mode safe",
+      "command": "bash scripts/control.sh git sync-safe",
       "problemMatcher": []
     },
     {
-      "label": "control: sync code-overwrite",
+      "label": "control: script manual",
       "type": "shell",
-      "command": "bash scripts/control.sh sync --mode code-overwrite",
+      "command": "bash scripts/control.sh script manual",
       "problemMatcher": []
     },
     {
-      "label": "control: sync clean",
+      "label": "control: script auto ubuntu",
       "type": "shell",
-      "command": "bash scripts/control.sh sync --mode clean",
+      "command": "bash scripts/control.sh script auto --os ubuntu --version 24.04",
+      "problemMatcher": []
+    },
+    {
+      "label": "control: script status",
+      "type": "shell",
+      "command": "bash scripts/control.sh script status",
       "problemMatcher": []
     }
   ]

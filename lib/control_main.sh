@@ -10,24 +10,21 @@ source "$SCRIPT_DIR/control_os.sh"
 source "$SCRIPT_DIR/control_jump_host.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/control_sync.sh"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/control_git.sh"
 
 imagectl_control_usage() {
   cat <<'EOF'
 usage:
-  scripts/control.sh <command> [args]
-
-commands:
-  sync      run jump-host sync/update mode
-  manual    interactive menu mode
-  auto      run full pipeline for one OS/version
-  status    show remote repo status and recent logs
-  logs      show recent remote logs
-  help      show this help
-
-examples:
-  scripts/control.sh sync --mode safe
-  scripts/control.sh manual
-  scripts/control.sh auto --os ubuntu --version 24.04
+  scripts/control.sh
+  scripts/control.sh ssh <connect|validate|info>
+  scripts/control.sh git <bootstrap|sync-safe|sync-code-overwrite|sync-clean|status|branch|push> [--yes]
+  scripts/control.sh script <manual|auto|status|logs> [args]
+  scripts/control.sh manual [args]
+  scripts/control.sh auto [args]
+  scripts/control.sh sync [--mode safe|code-overwrite|clean] [--yes]
+  scripts/control.sh status
+  scripts/control.sh logs
 EOF
 }
 
@@ -37,6 +34,7 @@ imagectl_run_phase_remote() {
   local version="${3:-}"
   local cmd=""
   cmd="$(imagectl_phase_command "$os" "$phase" "$version")" || imagectl_die "phase '$phase' not available for os '$os'"
+  imagectl_require_remote_repo_for_script
   imagectl_log "run phase os=$os phase=$phase version=${version:-n/a}"
   imagectl_run_remote_repo_cmd "$cmd"
 }
@@ -66,16 +64,22 @@ imagectl_manual_menu_once() {
   local os="$1"
   local version="$2"
   local action="$3"
+
   case "$action" in
-    sync-safe) imagectl_sync --mode safe ;;
-    sync-code-overwrite) imagectl_sync --mode code-overwrite ;;
-    sync-clean) imagectl_sync --mode clean ;;
-    preflight|download|import|create|configure|clean|publish|status|logs)
+    preflight|download|import|create|configure|clean|publish)
       if ! imagectl_os_is_implemented "$os"; then
         imagectl_log "os '$os' is not implemented yet"
         return 0
       fi
       imagectl_run_phase_remote "$os" "$action" "$version"
+      ;;
+    status)
+      imagectl_require_remote_repo_for_script
+      imagectl_run_remote_repo_cmd "git status --short --branch"
+      ;;
+    logs)
+      imagectl_require_remote_repo_for_script
+      imagectl_run_remote_repo_cmd "ls -1 logs | tail -n 30"
       ;;
     *)
       imagectl_die "unknown manual action: $action"
@@ -86,6 +90,7 @@ imagectl_manual_menu_once() {
 imagectl_manual_usage() {
   cat <<'EOF'
 usage:
+  scripts/control.sh script manual
   scripts/control.sh manual
   scripts/control.sh manual --os <name> --version <x.yz> --action <action>
 EOF
@@ -123,9 +128,6 @@ imagectl_manual() {
   while true; do
     local choice=""
     choice="$(imagectl_select_from_list "manual mode: os=$os version=$version" \
-      "sync-safe" \
-      "sync-code-overwrite" \
-      "sync-clean" \
       "preflight" \
       "download" \
       "import" \
@@ -137,7 +139,7 @@ imagectl_manual() {
       "logs" \
       "change-version" \
       "change-os" \
-      "exit")"
+      "back")"
     case "$choice" in
       change-version)
         version="$(imagectl_select_version_interactive "$os")"
@@ -147,7 +149,7 @@ imagectl_manual() {
         os="$(imagectl_require_supported_os "$os")"
         version="$(imagectl_select_version_interactive "$os")"
         ;;
-      exit)
+      back)
         break
         ;;
       *)
@@ -163,6 +165,7 @@ imagectl_manual() {
 imagectl_auto_usage() {
   cat <<'EOF'
 usage:
+  scripts/control.sh script auto --os <name> --version <x.yz> [--stop-before <phase>] [--resume-from <phase>] [--fail-fast yes|no] [--cleanup-mode <value>]
   scripts/control.sh auto --os <name> --version <x.yz> [--stop-before <phase>] [--resume-from <phase>] [--fail-fast yes|no] [--cleanup-mode <value>]
 EOF
 }
@@ -203,6 +206,7 @@ imagectl_auto() {
 
   imagectl_load_jump_host_config
   imagectl_check_remote_connection >/dev/null
+  imagectl_require_remote_repo_for_script
 
   if [[ -n "$resume_from" ]]; then
     for idx in "${!phases[@]}"; do
@@ -245,30 +249,157 @@ imagectl_auto() {
   imagectl_log "auto done os=$os version=$version"
 }
 
-imagectl_status() {
+imagectl_script_status() {
   imagectl_load_jump_host_config
   imagectl_check_remote_connection >/dev/null
+  imagectl_require_remote_repo_for_script
   imagectl_run_remote_repo_cmd "git status --short --branch && echo '--- logs ---' && ls -1 logs | tail -n 15"
 }
 
-imagectl_logs() {
+imagectl_script_logs() {
   imagectl_load_jump_host_config
   imagectl_check_remote_connection >/dev/null
+  imagectl_require_remote_repo_for_script
   imagectl_run_remote_repo_cmd "ls -1 logs | tail -n 30"
+}
+
+imagectl_ssh_usage() {
+  cat <<'EOF'
+usage:
+  scripts/control.sh ssh <connect|validate|info>
+EOF
+}
+
+imagectl_ssh_dispatch() {
+  local sub="${1:-}"
+  imagectl_load_jump_host_config
+  case "$sub" in
+    connect)
+      imagectl_log "opening SSH session to $(imagectl_jump_target)"
+      imagectl_ssh_connect_interactive
+      ;;
+    validate)
+      imagectl_check_remote_connection
+      ;;
+    info)
+      imagectl_ssh_info
+      ;;
+    ""|-h|--help|help)
+      imagectl_ssh_usage
+      ;;
+    *)
+      imagectl_die "unknown ssh subcommand: $sub"
+      ;;
+  esac
+}
+
+imagectl_script_usage() {
+  cat <<'EOF'
+usage:
+  scripts/control.sh script <manual|auto|status|logs> [args]
+EOF
+}
+
+imagectl_script_dispatch() {
+  local sub="${1:-}"
+  shift || true
+  case "$sub" in
+    manual) imagectl_manual "$@" ;;
+    auto) imagectl_auto "$@" ;;
+    status) imagectl_script_status ;;
+    logs) imagectl_script_logs ;;
+    ""|-h|--help|help) imagectl_script_usage ;;
+    *) imagectl_die "unknown script subcommand: $sub" ;;
+  esac
+}
+
+imagectl_menu_ssh() {
+  while true; do
+    local choice=""
+    choice="$(imagectl_select_from_list "SSH menu" "connect" "validate" "info" "back")"
+    case "$choice" in
+      connect) imagectl_ssh_dispatch connect ;;
+      validate) imagectl_ssh_dispatch validate ;;
+      info) imagectl_ssh_dispatch info ;;
+      back) break ;;
+    esac
+  done
+}
+
+imagectl_menu_git() {
+  while true; do
+    local choice=""
+    choice="$(imagectl_select_from_list "Git menu" \
+      "bootstrap-remote-repo" \
+      "sync-safe" \
+      "sync-code-overwrite" \
+      "sync-clean" \
+      "status" \
+      "branch-info" \
+      "push" \
+      "back")"
+    case "$choice" in
+      bootstrap-remote-repo) imagectl_git_dispatch bootstrap ;;
+      sync-safe) imagectl_git_dispatch sync-safe ;;
+      sync-code-overwrite) imagectl_git_dispatch sync-code-overwrite ;;
+      sync-clean) imagectl_git_dispatch sync-clean ;;
+      status) imagectl_git_dispatch status ;;
+      branch-info) imagectl_git_dispatch branch ;;
+      push) imagectl_git_dispatch push ;;
+      back) break ;;
+    esac
+  done
+}
+
+imagectl_menu_script() {
+  while true; do
+    local choice=""
+    choice="$(imagectl_select_from_list "Script menu" "manual" "auto" "status" "logs" "back")"
+    case "$choice" in
+      manual) imagectl_script_dispatch manual ;;
+      auto)
+        local os version
+        os="$(imagectl_select_os_interactive)"
+        os="$(imagectl_require_supported_os "$os")"
+        version="$(imagectl_select_version_interactive "$os")"
+        imagectl_script_dispatch auto --os "$os" --version "$version"
+        ;;
+      status) imagectl_script_dispatch status ;;
+      logs) imagectl_script_dispatch logs ;;
+      back) break ;;
+    esac
+  done
+}
+
+imagectl_interactive_menu() {
+  while true; do
+    local choice=""
+    choice="$(imagectl_select_from_list "Main menu" "SSH" "Git" "Script" "Exit")"
+    case "$choice" in
+      SSH) imagectl_menu_ssh ;;
+      Git) imagectl_menu_git ;;
+      Script) imagectl_menu_script ;;
+      Exit) break ;;
+    esac
+  done
 }
 
 imagectl_control_main() {
   imagectl_require_repo_root
-  local cmd="${1:-help}"
+  local cmd="${1:-menu}"
   shift || true
 
   case "$cmd" in
+    menu) imagectl_interactive_menu ;;
     help|-h|--help) imagectl_control_usage ;;
+    ssh) imagectl_ssh_dispatch "$@" ;;
+    git) imagectl_git_dispatch "$@" ;;
+    script) imagectl_script_dispatch "$@" ;;
     sync) imagectl_sync "$@" ;;
-    manual) imagectl_manual "$@" ;;
-    auto) imagectl_auto "$@" ;;
-    status) imagectl_status ;;
-    logs) imagectl_logs ;;
+    manual) imagectl_script_dispatch manual "$@" ;;
+    auto) imagectl_script_dispatch auto "$@" ;;
+    status) imagectl_script_dispatch status ;;
+    logs) imagectl_script_dispatch logs ;;
     *)
       imagectl_control_usage
       imagectl_die "unknown command: $cmd"

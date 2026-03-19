@@ -1,4 +1,4 @@
-# Copy this file to deploy/local/ssh/config and edit locally.
+# Copy this file to deploy/local/ssh_config and edit locally.
 Host jump-image-build
   HostName 203.0.113.10
   User ubuntu

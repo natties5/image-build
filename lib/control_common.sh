@@ -49,18 +49,18 @@ imagectl_select_from_list() {
   local i
   [[ "$count" -gt 0 ]] || return 1
 
-  printf '%s\n' "$prompt"
+  printf '%s\n' "$prompt" >&2
   for ((i=0; i<count; i++)); do
-    printf '  %d) %s\n' "$((i + 1))" "${options[$i]}"
+    printf '  %d) %s\n' "$((i + 1))" "${options[$i]}" >&2
   done
 
   local picked=""
   while true; do
-    read -r -p "choose [1-$count]: " picked
+    read -r -p "choose [1-$count]: " picked >&2
     if [[ "$picked" =~ ^[0-9]+$ ]] && ((picked >= 1 && picked <= count)); then
       printf '%s' "${options[$((picked - 1))]}"
       return 0
     fi
-    printf 'invalid selection\n'
+    printf 'invalid selection\n' >&2
   done
 }

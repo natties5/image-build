@@ -1,26 +1,84 @@
 # Operator Guide
 
-## Manual Mode
+## Main Controller
 
 Run:
 
 ```bash
-bash scripts/control.sh manual
+bash scripts/control.sh
 ```
 
-Flow:
+Top-level sections:
 
-1. Select OS.
-2. Select version.
-3. Choose action from menu.
-4. Action runs on jump host.
-5. Control returns to menu.
+1. SSH
+2. Git
+3. Script
+4. Exit
 
-Menu actions:
+## SSH Menu
 
+- `connect`: open normal SSH session to jump host; logout returns to menu.
+- `validate`: run non-interactive jump-host connectivity check.
+- `info`: show resolved target/repo config (safe fields only).
+
+Direct commands:
+
+```bash
+bash scripts/control.sh ssh connect
+bash scripts/control.sh ssh validate
+bash scripts/control.sh ssh info
+```
+
+## Git Menu
+
+- `bootstrap-remote-repo`
 - `sync-safe`
 - `sync-code-overwrite`
 - `sync-clean`
+- `status`
+- `branch-info`
+- `push`
+
+Bootstrap behavior:
+
+- Missing remote path: create parent directory and clone repo.
+- Existing empty directory: clone into existing path.
+- Existing git repo: fetch/checkout/pull configured branch.
+- Existing non-repo non-empty path: fail safely (no destructive cleanup).
+
+Direct commands:
+
+```bash
+bash scripts/control.sh git bootstrap
+bash scripts/control.sh git sync-safe
+bash scripts/control.sh git sync-code-overwrite --yes
+bash scripts/control.sh git sync-clean --yes
+bash scripts/control.sh git status
+bash scripts/control.sh git branch
+```
+
+## Script Menu
+
+- `manual`
+- `auto`
+- `status`
+- `logs`
+- `back`
+
+Script actions automatically require remote repo readiness; if missing, controller offers bootstrap.
+
+### Manual Mode
+
+Flow:
+
+1. Select OS
+2. Select version
+3. Select phase/action
+4. Action runs
+5. Return to same menu
+
+Actions:
+
 - `preflight`
 - `download`
 - `import`
@@ -32,29 +90,30 @@ Menu actions:
 - `logs`
 - `change-version`
 - `change-os`
-- `exit`
+- `back`
 
-## Auto Mode
+### Auto Mode
 
-Run a full Ubuntu pipeline for one version:
+Run:
 
 ```bash
-bash scripts/control.sh auto --os ubuntu --version 24.04
+bash scripts/control.sh script auto --os ubuntu --version 24.04
 ```
 
-Scaffolded options:
+Scaffold flags:
 
 - `--resume-from <phase>`
 - `--stop-before <phase>`
 - `--fail-fast yes|no`
 - `--cleanup-mode <value>`
 
-## Jump-Host Config Validation
+## Local-Only Jump-Host Files
 
-Validate connectivity:
+Store local-only files under `deploy/local/` (gitignored):
 
-```bash
-bash scripts/control.sh status
-```
+- `deploy/local/control.env`
+- `deploy/local/ssh_config`
+- `deploy/local/ssh/*` (private keys)
+- optional overrides under `deploy/local/*.env`
 
-If this succeeds, jump-host settings are loaded and SSH execution is available.
+Do not put real secrets in tracked files.
