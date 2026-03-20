@@ -12,9 +12,12 @@ tmp/**
 runtime/state/**
 logs/*.log
 logs/**/*.log
+manifests/**/*.tsv
+manifests/**/*.json
 
 # Node
 node_modules/
+package.json
 package-lock.json
 
 # OS
