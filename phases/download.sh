@@ -20,6 +20,10 @@ if [[ -f "$LEGACY_CONFIG_FILE" ]]; then
   source "$LEGACY_CONFIG_FILE"
 fi
 
+if [[ "${OS_FAMILY:-ubuntu}" != "ubuntu" ]]; then
+  exec bash "$REPO_ROOT/phases/download_multi_os.sh" "$CONFIG_FILE" "$@"
+fi
+
 PIPELINE_ROOT="${PIPELINE_ROOT:-}"
 if [[ -z "$PIPELINE_ROOT" ]]; then
   PIPELINE_ROOT="$REPO_ROOT"

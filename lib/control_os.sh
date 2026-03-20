@@ -5,7 +5,7 @@ imagectl_normalize_os() {
   local os_raw="${1:-}"
   local os="${os_raw,,}"
   case "$os" in
-    ubuntu|debian|centos|almalinux|rocky)
+    ubuntu|debian|fedora|centos|almalinux|rocky)
       printf '%s' "$os"
       ;;
     *)
@@ -20,22 +20,19 @@ imagectl_os_is_implemented() {
 }
 
 imagectl_list_supported_oses() {
-  printf '%s\n' ubuntu debian centos almalinux rocky
+  printf '%s\n' ubuntu debian fedora centos almalinux rocky
 }
 
 imagectl_require_supported_os() {
   local os
   os="$(imagectl_normalize_os "${1:-}")"
-  [[ -n "$os" ]] || imagectl_die "unsupported os: ${1:-<empty>} (supported: ubuntu,debian,centos,almalinux,rocky)"
+  [[ -n "$os" ]] || imagectl_die "unsupported os: ${1:-<empty>} (supported: ubuntu,debian,fedora,centos,almalinux,rocky)"
   printf '%s' "$os"
 }
 
 imagectl_version_list_for_os() {
   local os="$1"
-  local summary_file="$IMAGECTL_REPO_ROOT/manifests/ubuntu/ubuntu-auto-discover-summary.tsv"
-  if [[ "$os" != "ubuntu" ]]; then
-    return 0
-  fi
+  local summary_file="$IMAGECTL_REPO_ROOT/manifests/$os/${os}-auto-discover-summary.tsv"
   if [[ -f "$summary_file" ]]; then
     awk -F '\t' 'NR>1 && $1 != "" && !seen[$1]++ {print $1}' "$summary_file"
   fi
@@ -44,7 +41,9 @@ imagectl_version_list_for_os() {
 imagectl_summary_relpath_for_os() {
   local os="$1"
   case "$os" in
-    ubuntu) printf '%s' "manifests/ubuntu/ubuntu-auto-discover-summary.tsv" ;;
+    ubuntu|debian|fedora|centos|almalinux|rocky)
+      printf '%s' "manifests/$os/${os}-auto-discover-summary.tsv"
+      ;;
     *) return 1 ;;
   esac
 }
