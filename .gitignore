@@ -2,8 +2,20 @@
 deploy/local/**
 !deploy/local/.gitkeep
 
+# Credentials
+config/credentials/*.env
+!config/credentials/*.env.example
+
 # Runtime/build artifacts
 cache/**
 tmp/**
 runtime/state/**
 logs/*.log
+logs/**/*.log
+
+# Node
+node_modules/
+package-lock.json
+
+# OS
+.DS_Store

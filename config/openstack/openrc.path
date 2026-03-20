@@ -1,0 +1,4 @@
+# Path to OpenStack RC file on the jump host
+# Override locally in deploy/local/openrc.path
+
+OPENRC_FILE=

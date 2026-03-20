@@ -25,7 +25,7 @@ imagectl_runtime_default_for_key() {
     EXPECTED_PROJECT_NAME) printf '%s' "natties_op" ;;
     OPENRC_FILE) printf '%s' "/root/openrc-nut" ;;
     ROOT_USER) printf '%s' "root" ;;
-    ROOT_PASSWORD) printf '%s' "mis@Pass01" ;;
+    ROOT_PASSWORD) printf '%s' "" ;;
     NETWORK_ID) printf '%s' "PUBLIC2956" ;;
     FLAVOR_ID) printf '%s' "2-2-0" ;;
     SECURITY_GROUP) printf '%s' "allow-any" ;;

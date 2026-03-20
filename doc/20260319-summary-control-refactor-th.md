@@ -41,7 +41,7 @@
 - `EXPECTED_PROJECT_NAME=natties_op`
 - `OPENRC_FILE=/root/openrc-nut`
 - `ROOT_USER=root`
-- `ROOT_PASSWORD=mis@Pass01`
+- `ROOT_PASSWORD=<set in deploy/local/guest-access.env>`
 - `NETWORK_ID=PUBLIC2956`
 - `FLAVOR_ID=2-2-0`
 - `SECURITY_GROUP=allow-any`
