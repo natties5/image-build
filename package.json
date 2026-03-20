@@ -1,0 +1,28 @@
+{
+  "name": "image-build",
+  "version": "1.0.0",
+  "description": "This repository is a VS Code-friendly, jump-host-driven image build framework.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "lib": "lib"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/natties5/image-build.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/natties5/image-build/issues"
+  },
+  "homepage": "https://github.com/natties5/image-build#readme",
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1"
+  }
+}

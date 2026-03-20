@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/control_common.sh"
 # shellcheck disable=SC1091
-source "$SCRIPT_DIR/control_os.sh"
+source "$SCRIPT_DIR/os_helpers.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/control_jump_host.sh"
 # shellcheck disable=SC1091
@@ -13,7 +13,7 @@ source "$SCRIPT_DIR/control_sync.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/control_git.sh"
 # shellcheck disable=SC1091
-source "$SCRIPT_DIR/control_runtime_config.sh"
+source "$SCRIPT_DIR/runtime_helpers.sh"
 
 imagectl_control_usage() {
   cat <<'EOF'

@@ -39,10 +39,11 @@ imagectl_runtime_merge_sources_local() {
   local repo_root="$IMAGECTL_REPO_ROOT"
   local f=""
   for f in \
-    "$repo_root/config/openstack.env" \
-    "$repo_root/config/openrc.path" \
+    "$repo_root/config/runtime/openstack.env" \
+    "$repo_root/config/runtime/openrc.path" \
     "$repo_root/config/guest/access.env" \
-    "$repo_root/config/guest.env" \
+    "$repo_root/config/guest/policy.env" \
+    "$repo_root/config/guest/config.env" \
     "$repo_root/deploy/control.env.example" \
     "$repo_root/deploy/local/control.env" \
     "$repo_root/deploy/local/openstack.env" \
@@ -151,7 +152,7 @@ imagectl_runtime_create_overlay_file() {
       imagectl_runtime_emit_guest_access_overlay > "$tmp_file"
       ;;
     deploy/local/publish.env)
-      tracked_src="$IMAGECTL_REPO_ROOT/config/publish.env"
+      tracked_src="$IMAGECTL_REPO_ROOT/config/control/publish.env"
       if [[ -f "$local_src" ]]; then
         cat "$local_src" > "$tmp_file"
       elif [[ -f "$tracked_src" ]]; then
@@ -159,7 +160,7 @@ imagectl_runtime_create_overlay_file() {
       fi
       ;;
     deploy/local/clean.env)
-      tracked_src="$IMAGECTL_REPO_ROOT/config/clean.env"
+      tracked_src="$IMAGECTL_REPO_ROOT/config/control/clean.env"
       if [[ -f "$local_src" ]]; then
         cat "$local_src" > "$tmp_file"
       elif [[ -f "$tracked_src" ]]; then
@@ -192,8 +193,8 @@ EOF
 imagectl_runtime_validate_required_local_base_files() {
   local file=""
   for file in \
-    "$IMAGECTL_REPO_ROOT/config/openstack.env" \
-    "$IMAGECTL_REPO_ROOT/config/openrc.path" \
+    "$IMAGECTL_REPO_ROOT/config/runtime/openstack.env" \
+    "$IMAGECTL_REPO_ROOT/config/runtime/openrc.path" \
     "$IMAGECTL_REPO_ROOT/config/guest/access.env"
   do
     [[ -f "$file" ]] || imagectl_die "missing local runtime base config file: $file"

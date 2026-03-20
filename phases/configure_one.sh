@@ -6,7 +6,7 @@ REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 # shellcheck disable=SC1091
 source "$REPO_ROOT/lib/local_overrides.sh"
 STAGE_CONFIG_FILE="${STAGE_CONFIG_FILE:-$REPO_ROOT/config/guest/policy.env}"
-LEGACY_STAGE_CONFIG_FILE="${REPO_ROOT}/config/guest-config.env"
+LEGACY_STAGE_CONFIG_FILE="${REPO_ROOT}/config/guest/config.env"
 STATE_DIR="${STATE_DIR:-$REPO_ROOT/runtime/state}"
 LOG_DIR="${LOG_DIR:-$REPO_ROOT/logs}"
 

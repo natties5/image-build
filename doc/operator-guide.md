@@ -1,5 +1,7 @@
 # Operator Guide
 
+For detailed information on how the configuration is structured, see [Config Layout](config-layout.md).
+
 ## Main Controller
 
 Run:

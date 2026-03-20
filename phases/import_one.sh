@@ -10,8 +10,8 @@ source "$REPO_ROOT/lib/local_overrides.sh"
 imagectl_init_layout "$REPO_ROOT"
 imagectl_ensure_layout_dirs
 
-OPENSTACK_ENV_FILE="${OPENSTACK_ENV_FILE:-$REPO_ROOT/config/openstack.env}"
-OPENRC_PATH_FILE="${OPENRC_PATH_FILE:-$REPO_ROOT/config/openrc.path}"
+OPENSTACK_ENV_FILE="${OPENSTACK_ENV_FILE:-$REPO_ROOT/config/runtime/openstack.env}"
+OPENRC_PATH_FILE="${OPENRC_PATH_FILE:-$REPO_ROOT/config/runtime/openrc.path}"
 
 [[ -f "$OPENSTACK_ENV_FILE" ]] || { echo "missing config: $OPENSTACK_ENV_FILE" >&2; exit 1; }
 # shellcheck disable=SC1090

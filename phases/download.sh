@@ -9,7 +9,7 @@ imagectl_init_layout "$REPO_ROOT"
 imagectl_ensure_layout_dirs
 
 CONFIG_FILE="${1:-$REPO_ROOT/config/os/ubuntu.env}"
-LEGACY_CONFIG_FILE="${REPO_ROOT}/config/source.env"
+LEGACY_CONFIG_FILE="${REPO_ROOT}/config/control/source.env"
 
 if [[ -f "$CONFIG_FILE" ]]; then
   # shellcheck disable=SC1090

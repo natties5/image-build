@@ -9,7 +9,7 @@ source "$REPO_ROOT/lib/layout.sh"
 source "$REPO_ROOT/lib/local_overrides.sh"
 imagectl_init_layout "$REPO_ROOT"
 
-OPENSTACK_ENV_FILE="${OPENSTACK_ENV_FILE:-$REPO_ROOT/config/openstack.env}"
+OPENSTACK_ENV_FILE="${OPENSTACK_ENV_FILE:-$REPO_ROOT/config/runtime/openstack.env}"
 [[ -f "$OPENSTACK_ENV_FILE" ]] || { echo "missing config: $OPENSTACK_ENV_FILE" >&2; exit 1; }
 # shellcheck disable=SC1090
 source "$OPENSTACK_ENV_FILE"
