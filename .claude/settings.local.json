@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bash -n scripts/control.sh)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(bash scripts/control.sh --help)",
+      "Bash(bash -n lib/runtime_helpers.sh)",
+      "Bash(bash -n lib/local_overrides.sh)",
+      "Bash(bash -n lib/control_status.sh)"
+    ]
+  }
+}

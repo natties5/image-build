@@ -3,19 +3,19 @@ set -Eeuo pipefail
 
 imagectl_runtime_config_items() {
   cat <<'EOF'
-deploy/local/guest-access.env
-deploy/local/openstack.env
-deploy/local/openrc.path
-deploy/local/publish.env
-deploy/local/clean.env
+settings/jumphost.env
+settings/git.env
+settings/openstack.env
+settings/openrc.env
+settings/credentials.env
 EOF
 }
 
 imagectl_runtime_required_remote_files() {
   cat <<'EOF'
-deploy/local/guest-access.env
-deploy/local/openstack.env
-deploy/local/openrc.path
+settings/openstack.env
+settings/openrc.env
+settings/credentials.env
 EOF
 }
 
@@ -37,25 +37,40 @@ imagectl_runtime_default_for_key() {
 
 imagectl_runtime_merge_sources_local() {
   local repo_root="$IMAGECTL_REPO_ROOT"
-  local f=""
+  local settings_dir="$repo_root/settings"
+  local f
+
+  # Load tracked config defaults (OS-agnostic policy)
   for f in \
-    "$repo_root/config/runtime/openstack.env" \
-    "$repo_root/config/runtime/openrc.path" \
-    "$repo_root/config/guest/access.env" \
-    "$repo_root/config/guest/policy.env" \
-    "$repo_root/config/guest/config.env" \
-    "$repo_root/deploy/control.env.example" \
+    "$repo_root/config/guest/base.env" \
+    "$repo_root/config/pipeline/publish.env" \
+    "$repo_root/config/pipeline/clean.env"
+  do
+    # shellcheck disable=SC1090
+    [[ -f "$f" ]] && source "$f"
+  done
+
+  # Load private settings (gitignored — primary source)
+  for f in \
+    "$settings_dir/jumphost.env" \
+    "$settings_dir/git.env" \
+    "$settings_dir/openstack.env" \
+    "$settings_dir/openrc.env" \
+    "$settings_dir/credentials.env"
+  do
+    # shellcheck disable=SC1090
+    [[ -f "$f" ]] && source "$f"
+  done
+
+  # Fallback: deploy/local/ for backward compatibility
+  for f in \
     "$repo_root/deploy/local/control.env" \
     "$repo_root/deploy/local/openstack.env" \
     "$repo_root/deploy/local/openrc.path" \
-    "$repo_root/deploy/local/guest-access.env" \
-    "$repo_root/deploy/local/publish.env" \
-    "$repo_root/deploy/local/clean.env"
+    "$repo_root/deploy/local/guest-access.env"
   do
-    if [[ -f "$f" ]]; then
-      # shellcheck disable=SC1090
-      source "$f"
-    fi
+    # shellcheck disable=SC1090
+    [[ -f "$f" ]] && source "$f"
   done
 }
 
@@ -137,11 +152,14 @@ imagectl_runtime_emit_openrc_overlay() {
 imagectl_runtime_create_overlay_file() {
   local rel="$1"
   local local_src="$IMAGECTL_REPO_ROOT/$rel"
-  local tracked_src=""
-  local tmp_file=""
+  local tmp_file
 
   tmp_file="$(mktemp)"
   case "$rel" in
+    settings/*.env)
+      # Settings files are uploaded as-is (they are the source of truth)
+      [[ -f "$local_src" ]] && cat "$local_src" > "$tmp_file"
+      ;;
     deploy/local/openstack.env)
       imagectl_runtime_emit_openstack_overlay > "$tmp_file"
       ;;
@@ -152,7 +170,7 @@ imagectl_runtime_create_overlay_file() {
       imagectl_runtime_emit_guest_access_overlay > "$tmp_file"
       ;;
     deploy/local/publish.env)
-      tracked_src="$IMAGECTL_REPO_ROOT/config/control/publish.env"
+      local tracked_src="$IMAGECTL_REPO_ROOT/config/pipeline/publish.env"
       if [[ -f "$local_src" ]]; then
         cat "$local_src" > "$tmp_file"
       elif [[ -f "$tracked_src" ]]; then
@@ -160,7 +178,7 @@ imagectl_runtime_create_overlay_file() {
       fi
       ;;
     deploy/local/clean.env)
-      tracked_src="$IMAGECTL_REPO_ROOT/config/control/clean.env"
+      local tracked_src="$IMAGECTL_REPO_ROOT/config/pipeline/clean.env"
       if [[ -f "$local_src" ]]; then
         cat "$local_src" > "$tmp_file"
       elif [[ -f "$tracked_src" ]]; then
@@ -191,13 +209,13 @@ EOF
 }
 
 imagectl_runtime_validate_required_local_base_files() {
-  local file=""
+  local file
   for file in \
-    "$IMAGECTL_REPO_ROOT/config/runtime/openstack.env" \
-    "$IMAGECTL_REPO_ROOT/config/runtime/openrc.path" \
-    "$IMAGECTL_REPO_ROOT/config/guest/access.env"
+    "$IMAGECTL_REPO_ROOT/settings/openstack.env" \
+    "$IMAGECTL_REPO_ROOT/settings/openrc.env" \
+    "$IMAGECTL_REPO_ROOT/settings/credentials.env"
   do
-    [[ -f "$file" ]] || imagectl_die "missing local runtime base config file: $file"
+    [[ -f "$file" ]] || imagectl_die "missing settings file: $file  (copy from ${file}.example and fill in values)"
   done
 }
 
@@ -207,7 +225,7 @@ imagectl_runtime_validate_local_values_for_mutating() {
   while IFS= read -r key; do
     [[ -n "$key" ]] || continue
     value="$(imagectl_runtime_effective_local_value "$key")"
-    [[ -n "$value" ]] || imagectl_die "missing local runtime value: $key (set in deploy/local/*.env or use known defaults)"
+    [[ -n "$value" ]] || imagectl_die "missing runtime value: $key (set in settings/openstack.env or settings/credentials.env)"
   done < <(imagectl_runtime_required_keys_for_mutating)
 }
 
@@ -248,7 +266,7 @@ imagectl_runtime_sync_to_remote() {
     rm -f "$tmp_file"
   done < <(imagectl_runtime_config_items)
 
-  imagectl_log "runtime config sync done: files_synced=$synced (remote: $JUMP_HOST_REPO_PATH/deploy/local; ssh keys/config are never synced)"
+  imagectl_log "runtime config sync done: files_synced=$synced (remote: $JUMP_HOST_REPO_PATH/settings/; ssh keys/config are never synced)"
 }
 
 imagectl_runtime_validate_remote_values_for_mutating() {
@@ -267,15 +285,12 @@ imagectl_runtime_validate_remote_values_for_mutating() {
     [[ -n "$key" ]] || continue
     key_q="$(printf '%q' "$key")"
     imagectl_run_remote_repo_cmd "set -euo pipefail; \
-# shellcheck disable=SC1091 \
-source deploy/local/openstack.env; \
-# shellcheck disable=SC1091 \
-source deploy/local/openrc.path; \
-# shellcheck disable=SC1091 \
-source deploy/local/guest-access.env; \
+[[ -f settings/openstack.env ]]   && source settings/openstack.env; \
+[[ -f settings/openrc.env ]]      && source settings/openrc.env; \
+[[ -f settings/credentials.env ]] && source settings/credentials.env; \
 k=$key_q; \
 v=\${!k:-}; \
-[[ -n \"\$v\" ]] || { echo \"missing remote runtime value: \$k (required before mutating phases)\" >&2; exit 1; }"
+[[ -n \"\$v\" ]] || { echo \"missing remote runtime value: \$k (set in settings/openstack.env or settings/credentials.env)\" >&2; exit 1; }"
   done < <(imagectl_runtime_required_keys_for_mutating)
 }
 

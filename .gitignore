@@ -1,4 +1,9 @@
-# Local-only jump-host files
+# Settings (private - never commit)
+settings/
+!settings/*.env.example
+!settings/README.md
+
+# Local-only jump-host files (backward compat)
 deploy/local/**
 !deploy/local/.gitkeep
 

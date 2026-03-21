@@ -16,18 +16,27 @@ imagectl_trim_value() {
 }
 
 imagectl_load_jump_host_config() {
-  local tracked_file="$IMAGECTL_REPO_ROOT/deploy/control.env.example"
-  local local_file="$IMAGECTL_REPO_ROOT/deploy/local/control.env"
+  local settings_dir="$IMAGECTL_REPO_ROOT/settings"
+  local f
 
-  [[ -f "$tracked_file" ]] || imagectl_die "missing template config: $tracked_file"
-  # shellcheck disable=SC1090
-  source "$tracked_file"
-
-  if [[ -f "$local_file" ]]; then
+  # Load settings/ first (primary source — gitignored)
+  for f in \
+    "$settings_dir/jumphost.env" \
+    "$settings_dir/git.env" \
+    "$settings_dir/openstack.env" \
+    "$settings_dir/openrc.env" \
+    "$settings_dir/credentials.env"
+  do
     # shellcheck disable=SC1090
-    source "$local_file"
-  fi
+    [[ -f "$f" ]] && source "$f"
+  done
 
+  # Fallback: deploy/local/control.env for backward compatibility
+  local local_file="$IMAGECTL_REPO_ROOT/deploy/local/control.env"
+  # shellcheck disable=SC1090
+  [[ -f "$local_file" ]] && source "$local_file"
+
+  # Apply defaults
   JUMP_SSH_CONFIG_FILE="${JUMP_SSH_CONFIG_FILE:-$IMAGECTL_REPO_ROOT/deploy/local/ssh_config}"
   JUMP_SSH_KEY_FILE="${JUMP_SSH_KEY_FILE:-$IMAGECTL_REPO_ROOT/deploy/local/ssh/id_jump}"
   JUMP_HOST_ALIAS="${JUMP_HOST_ALIAS:-}"
@@ -40,6 +49,7 @@ imagectl_load_jump_host_config() {
   JUMP_MODE_DEFAULT="${JUMP_MODE_DEFAULT:-manual}"
   EXPECTED_PROJECT_NAME="${EXPECTED_PROJECT_NAME:-}"
 
+  # Trim whitespace / CRLF
   JUMP_SSH_CONFIG_FILE="$(imagectl_trim_value "$JUMP_SSH_CONFIG_FILE")"
   JUMP_SSH_KEY_FILE="$(imagectl_trim_value "$JUMP_SSH_KEY_FILE")"
   JUMP_HOST_ALIAS="$(imagectl_trim_value "$JUMP_HOST_ALIAS")"
@@ -52,13 +62,14 @@ imagectl_load_jump_host_config() {
   JUMP_MODE_DEFAULT="$(imagectl_trim_value "$JUMP_MODE_DEFAULT")"
   EXPECTED_PROJECT_NAME="$(imagectl_trim_value "$EXPECTED_PROJECT_NAME")"
 
-  [[ -n "$JUMP_HOST_REPO_PATH" ]] || imagectl_die "JUMP_HOST_REPO_PATH is empty. Set deploy/local/control.env"
-  [[ -n "$JUMP_HOST_BRANCH" ]] || imagectl_die "JUMP_HOST_BRANCH is empty. Set deploy/local/control.env"
-  [[ -n "$JUMP_HOST_REPO_URL" ]] || imagectl_die "JUMP_HOST_REPO_URL is empty and origin remote was not found"
+  # Validate required values
+  [[ -n "$JUMP_HOST_REPO_PATH" ]] || imagectl_die "JUMP_HOST_REPO_PATH is empty. Set settings/jumphost.env"
+  [[ -n "$JUMP_HOST_BRANCH" ]]    || imagectl_die "JUMP_HOST_BRANCH is empty. Set settings/jumphost.env"
+  [[ -n "$JUMP_HOST_REPO_URL" ]]  || imagectl_die "JUMP_HOST_REPO_URL is empty. Set settings/git.env"
 
   if [[ -z "$JUMP_HOST_ALIAS" ]]; then
-    [[ -n "$JUMP_HOST_USER" ]] || imagectl_die "JUMP_HOST_USER is empty and JUMP_HOST_ALIAS is not set"
-    [[ -n "$JUMP_HOST_ADDR" ]] || imagectl_die "JUMP_HOST_ADDR is empty and JUMP_HOST_ALIAS is not set"
+    [[ -n "$JUMP_HOST_USER" ]] || imagectl_die "JUMP_HOST_USER is empty. Set settings/jumphost.env"
+    [[ -n "$JUMP_HOST_ADDR" ]] || imagectl_die "JUMP_HOST_ADDR is empty. Set settings/jumphost.env"
   fi
 }
 

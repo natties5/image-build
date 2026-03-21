@@ -146,18 +146,14 @@ imagectl_status_show() {
   local connected="no"
   local jump_target="(not configured)"
   local project=""
-  local example_file="$IMAGECTL_REPO_ROOT/deploy/control.env.example"
-
-  if [[ -f "$example_file" ]]; then
-    # Test config in subshell first (exit 1 inside subshell won't kill parent)
-    if ( imagectl_load_jump_host_config ) >/dev/null 2>&1; then
-      imagectl_load_jump_host_config >/dev/null 2>&1
-      jump_target="$(imagectl_jump_target)"
-      project="${EXPECTED_PROJECT_NAME:-}"
-      if imagectl_check_remote_connection >/dev/null 2>&1; then
-        connected="yes"
-        imagectl_status_load
-      fi
+  # Try to load jump host config (graceful — skip if settings/ not set up yet)
+  if ( imagectl_load_jump_host_config ) >/dev/null 2>&1; then
+    imagectl_load_jump_host_config >/dev/null 2>&1
+    jump_target="$(imagectl_jump_target)"
+    project="${EXPECTED_PROJECT_NAME:-}"
+    if imagectl_check_remote_connection >/dev/null 2>&1; then
+      connected="yes"
+      imagectl_status_load
     fi
   fi
 
@@ -172,8 +168,7 @@ imagectl_status_show() {
 imagectl_status_detailed() {
   imagectl_status_show
 
-  local example_file="$IMAGECTL_REPO_ROOT/deploy/control.env.example"
-  if [[ -f "$example_file" ]] && ( imagectl_load_jump_host_config ) >/dev/null 2>&1; then
+  if ( imagectl_load_jump_host_config ) >/dev/null 2>&1; then
     imagectl_load_jump_host_config >/dev/null 2>&1
     if imagectl_check_remote_connection >/dev/null 2>&1; then
       printf '--- Remote Git Status ---\n'
