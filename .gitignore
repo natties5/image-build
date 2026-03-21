@@ -1,29 +1,26 @@
-# Settings (private - never commit)
-settings/**
-!settings/*.env.example
-!settings/README.md
+# ─── Settings (private — never commit) ───────────────────────────────────────
+settings/*.env
+!settings/*.env.template
 
-# Local-only jump-host files (backward compat)
+# ─── Workspace (downloaded images — large binaries) ───────────────────────────
+workspace/
+
+# ─── Runtime artifacts ────────────────────────────────────────────────────────
+runtime/
+logs/
+cache/
+tmp/
+
+# ─── Legacy artifacts ─────────────────────────────────────────────────────────
 deploy/local/**
 !deploy/local/.gitkeep
-
-# Credentials
-config/credentials/*.env
-!config/credentials/*.env.example
-
-# Runtime/build artifacts
-cache/**
-tmp/**
-runtime/state/**
-logs/*.log
-logs/**/*.log
 manifests/**/*.tsv
 manifests/**/*.json
 
-# Node
+# ─── OS ───────────────────────────────────────────────────────────────────────
+.DS_Store
+
+# ─── Node ─────────────────────────────────────────────────────────────────────
 node_modules/
 package.json
 package-lock.json
-
-# OS
-.DS_Store

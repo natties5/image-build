@@ -1,100 +1,129 @@
 # image-build
 
-ระบบ Pipeline อัตโนมัติสำหรับสร้างและเผยแพร่ OpenStack Image ของ Linux distributions ต่างๆ ทำงานผ่าน Jump Host
+Portable, menu-driven OpenStack image build pipeline for Linux distributions.
+
+---
+
+## Overview
+
+This pipeline discovers, downloads, and builds production-ready cloud images for OpenStack. It runs locally — no jump-host required.
+
+**Phases:**
+1. `sync_download` — Discover & download base image from official upstream
+2. `import_base`   — Import local image into Glance
+3. `create_vm`     — Create boot volume + VM from base image
+4. `configure_guest` — SSH in and configure guest OS
+5. `clean_guest`   — Final clean + poweroff
+6. `publish_final` — Upload volume as final image, cleanup
 
 ---
 
 ## Quick Start
 
-### 1. เตรียม Local
-
 ```bash
-# วาง SSH private key
-deploy/local/ssh/id_jump
+# 1. Copy and fill in settings (never commit these files)
+cp settings/openstack.env.template settings/openstack.env
+cp settings/guest-access.env.template settings/guest-access.env
 
-# ตั้งค่า SSH config
-deploy/local/ssh_config
+# 2. Source your OpenStack credentials
+source /path/to/openrc.sh
 
-# ตั้งค่า jump host และ repo path
-deploy/local/control.env        # JUMP_HOST_ADDR, JUMP_HOST_USER, JUMP_HOST_REPO_PATH
-deploy/local/guest-access.env   # ROOT_USER, ROOT_PASSWORD, SSH_PORT
-deploy/local/openstack.env      # NETWORK_ID, FLAVOR_ID, SECURITY_GROUP, ...
-deploy/local/openrc.path        # OPENRC_FILE=/path/to/openrc
-```
-
-ดู template ได้ที่ `deploy/*.example` และ `config/credentials/guest-access.env.example`
-
-### 2. รัน Controller
-
-```bash
+# 3. Launch interactive menu
 bash scripts/control.sh
-```
 
-เมนูหลัก: **SSH** → **Git** → **Pipeline** → **Exit**
-
-### 3. ขั้นตอนแรก (ครั้งแรก)
-
-```bash
-bash scripts/control.sh git bootstrap      # เตรียม repo บน jump host
-bash scripts/control.sh git sync-safe      # sync code ขึ้น jump host
-```
-
-### 4. รัน Pipeline
-
-```bash
-bash scripts/control.sh pipeline auto-by-os --os ubuntu
-bash scripts/control.sh pipeline auto-by-os-version --os ubuntu --version 24.04
-bash scripts/control.sh pipeline manual
+# — OR — run directly:
+bash scripts/control.sh sync dry-run --os ubuntu
+bash scripts/control.sh sync dry-run --os debian
+bash scripts/control.sh sync download --os ubuntu --version 24.04
+bash scripts/control.sh status dashboard
 ```
 
 ---
 
-## OS ที่รองรับ
+## OS Support
 
-| OS         | Download | Import | Configure | Publish |
-|------------|:--------:|:------:|:---------:|:-------:|
-| ubuntu     | ✓        | ✓      | ✓         | ✓       |
-| debian     | ✓        | -      | -         | -       |
-| rocky      | ✓        | -      | -         | -       |
-| centos     | ✓        | -      | -         | -       |
-| almalinux  | ✓        | -      | -         | -       |
-
----
-
-## โครงสร้างโปรเจกต์
-
-```
-bin/imagectl.sh          ← entry point สำหรับรันบน jump host
-scripts/control.sh       ← entry point สำหรับ operator บน local
-
-phases/                  ← pipeline phase scripts (download, import, create, configure, clean, publish)
-lib/                     ← shared library functions (รวมถึง core_paths.sh)
-
-settings/                ← ข้อมูล configuration และ secrets ส่วนตัว (gitignored ทั้งหมด)
-                         มีการจำลองไฟล์จาก *.example อัตโนมัติเมื่อรันครั้งแรก
-├── openstack.env        ← OpenStack credentials
-├── openrc.env           ← path ไปยัง openrc file
-├── guest-access.env     ← ข้อมูลสำหรับเข้าถึง Guest VM
-└── ...
-
-config/                  ← tracked system defaults และ reusable rules
-
-deploy/
-├── local/               ← (Legacy) ย้ายไปใช้โฟลเดอร์ settings/ เป็นหลัก
-└── *.example            ← template สำหรับการอ้างอิง
-
-manifests/               ← runtime artifacts (gitignored ยกเว้น .gitkeep)
-runtime/state/           ← state ของแต่ละ phase (gitignored)
-logs/                    ← log files (gitignored)
-cache/                   ← downloaded images (gitignored)
-doc/                     ← เอกสารอธิบายระบบ (ภาษาไทย)
-```
+| OS         | Min Version | Sync | Import | Configure | Publish |
+|------------|:-----------:|:----:|:------:|:---------:|:-------:|
+| ubuntu     | 18.04       | ✓    | -      | -         | -       |
+| debian     | 12          | ✓    | -      | -         | -       |
+| fedora     | 41          | ✓    | -      | -         | -       |
+| almalinux  | 8           | ✓    | -      | -         | -       |
+| rocky      | 8           | ✓    | -      | -         | -       |
 
 ---
 
-## เอกสาร
+## Project Structure
 
-| ไฟล์ | เนื้อหา |
-|------|---------|
-| [doc/20260321-summary-fresh-clone-and-path-fixes-th.md](doc/20260321-summary-fresh-clone-and-path-fixes-th.md) | สรุปการแก้ไขปัญหา Fresh Clone Breakage และ Path Architecture |
+```
+scripts/control.sh          ← single user-facing entrypoint
 
+lib/
+├── core_paths.sh           ← canonical path variables (source of truth)
+├── common_utils.sh         ← logging, retry, timeout, SSH helpers
+├── openstack_api.sh        ← OpenStack CLI wrappers (skeleton)
+├── config_store.sh         ← load/merge config files
+└── state_store.sh          ← read/write flags and runtime JSON
+
+phases/
+├── sync_download.sh        ← REAL: discover/download base images
+├── import_base.sh          ← skeleton
+├── create_vm.sh            ← skeleton
+├── configure_guest.sh      ← skeleton
+├── clean_guest.sh          ← skeleton
+└── publish_final.sh        ← skeleton
+
+config/
+├── defaults.env            ← project-wide tracked defaults
+├── os/<os>/sync.env        ← per-OS discovery rules (tracked)
+└── guest/<os>/             ← per-OS/version guest policy (tracked)
+
+settings/
+├── openstack.env.template  ← copy → openstack.env (gitignored)
+└── guest-access.env.template ← copy → guest-access.env (gitignored)
+
+workspace/images/<os>/<ver>/ ← downloaded images (gitignored)
+runtime/state/<phase>/       ← flag files + JSON manifests (gitignored)
+runtime/logs/<phase>/        ← timestamped log files (gitignored)
+```
+
+---
+
+## Runtime Model
+
+Every phase writes three output types:
+
+| Type | Location | Purpose |
+|------|----------|---------|
+| JSON manifest | `runtime/state/<phase>/<os>-<ver>.json` | Full result data |
+| Flag file | `runtime/state/<phase>/<os>-<ver>.<flag>` | Quick status check |
+| Log file | `runtime/logs/<phase>/<os>-<ver>.log` | Timestamped trace |
+
+Flag files: `.ready`, `.dryrun-ok`, `.failed`
+
+---
+
+## Design Principles
+
+- **Local-first**: no jump-host, runs on any Linux/Bash environment
+- **Single entrypoint**: `scripts/control.sh` only
+- **Input = `.env`, Output = `.json`, State = flag files**
+- **Dry-run first**: every long operation supports `--dry-run`
+- **Fail clearly**: `.failed` flag + JSON with `failure_reason` on any error
+- **Never hardcode URLs**: all image discovery is rule-driven via `config/os/*/sync.env`
+
+---
+
+## Documentation
+
+Design docs are in `rebuild-project-doc/` (read-only reference):
+
+| File | Topic |
+|------|-------|
+| 01_START_PROJECT_BLUEPRINT.md | Architecture overview, directory structure |
+| 02_DOWNLOAD_IMAGE_SYSTEM.md   | sync_download design |
+| 05_CONFIG_SCHEMA_REFERENCE.md | Config file schemas |
+| 06_OPENSTACK_PIPELINE_DESIGN.md | Full pipeline design |
+| 07_MENU_DESIGN.md             | Menu structure |
+| 08_HELPER_LIBRARIES_DESIGN.md | lib/ function specs |
+| 09_IMPLEMENTATION_ROADMAP.md  | Milestone ordering |
+| 10_AI_IMPLEMENTATION_NOTES.md | AI coding guardrails |

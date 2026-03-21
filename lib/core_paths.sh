@@ -1,71 +1,86 @@
 #!/usr/bin/env bash
-# lib/core_paths.sh
-# Canonical path definitions for the image-build repository.
-
+# lib/core_paths.sh — Single source of truth for all project paths.
+# Every phase MUST source this file before using any path variable.
 set -Eeuo pipefail
 
-# Calculate robust ROOT_DIR based on the location of this script
-export ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+# Resolve repo root from this file's location (lib/ → parent)
+_CORE_PATHS_SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export ROOT_DIR
+ROOT_DIR="$(cd "${_CORE_PATHS_SELF}/.." && pwd)"
 
-# Core directories
-export BIN_DIR="$ROOT_DIR/bin"
-export LIB_DIR="$ROOT_DIR/lib"
-export PHASES_DIR="$ROOT_DIR/phases"
-export CONFIG_DIR="$ROOT_DIR/config"
-export SETTINGS_DIR="$ROOT_DIR/settings"
+# ─── Top-level directories ────────────────────────────────────────────────────
+export SCRIPTS_DIR="${ROOT_DIR}/scripts"
+export LIB_DIR="${ROOT_DIR}/lib"
+export PHASES_DIR="${ROOT_DIR}/phases"
+export CONFIG_DIR="${ROOT_DIR}/config"
+export SETTINGS_DIR="${ROOT_DIR}/settings"
+export WORKSPACE_DIR="${ROOT_DIR}/workspace"
+export IMAGES_DIR="${WORKSPACE_DIR}/images"
+export RUNTIME_DIR="${ROOT_DIR}/runtime"
+export STATE_DIR="${RUNTIME_DIR}/state"
+export LOG_DIR="${RUNTIME_DIR}/logs"
 
-# Transient and payload directories
-export WORKSPACE_DIR="$ROOT_DIR/workspace"
-export IMAGES_DIR="$WORKSPACE_DIR/images"
-export RUNTIME_DIR="$ROOT_DIR/runtime"
-export STATE_DIR="$RUNTIME_DIR/state"
-export LOG_DIR="$ROOT_DIR/logs"
-export MANIFESTS_DIR="$ROOT_DIR/manifests"
+# ─── Phase state subdirectories ───────────────────────────────────────────────
+export STATE_SYNC_DIR="${STATE_DIR}/sync"
+export STATE_IMPORT_DIR="${STATE_DIR}/import"
+export STATE_CREATE_DIR="${STATE_DIR}/create"
+export STATE_CONFIGURE_DIR="${STATE_DIR}/configure"
+export STATE_CLEAN_DIR="${STATE_DIR}/clean"
+export STATE_PUBLISH_DIR="${STATE_DIR}/publish"
 
-imagectl_init_core_paths() {
-  # Legacy fallbacks mapped to canonical
-  export PIPELINE_ROOT="${PIPELINE_ROOT:-$ROOT_DIR}"
-  export UBUNTU_MANIFEST_DIR="${UBUNTU_MANIFEST_DIR:-$MANIFESTS_DIR/ubuntu}"
-  export OPENSTACK_MANIFEST_DIR="${OPENSTACK_MANIFEST_DIR:-$MANIFESTS_DIR/openstack}"
-  
-  export LEGACY_MANIFEST_DIR="${LEGACY_MANIFEST_DIR:-$PIPELINE_ROOT/manifest}"
-  export LEGACY_UBUNTU_MANIFEST_DIR="${LEGACY_UBUNTU_MANIFEST_DIR:-$LEGACY_MANIFEST_DIR/ubuntu}"
-  export LEGACY_OPENSTACK_MANIFEST_DIR="${LEGACY_OPENSTACK_MANIFEST_DIR:-$LEGACY_MANIFEST_DIR/openstack}"
-  
-  export SUMMARY_FILE="${SUMMARY_FILE:-$UBUNTU_MANIFEST_DIR/ubuntu-auto-discover-summary.tsv}"
-  export LEGACY_SUMMARY_FILE="${LEGACY_SUMMARY_FILE:-$LEGACY_UBUNTU_MANIFEST_DIR/ubuntu-auto-discover-summary.tsv}"
+# ─── Phase log subdirectories ─────────────────────────────────────────────────
+export LOG_SYNC_DIR="${LOG_DIR}/sync"
+export LOG_IMPORT_DIR="${LOG_DIR}/import"
+export LOG_CREATE_DIR="${LOG_DIR}/create"
+export LOG_CONFIGURE_DIR="${LOG_DIR}/configure"
+export LOG_CLEAN_DIR="${LOG_DIR}/clean"
+export LOG_PUBLISH_DIR="${LOG_DIR}/publish"
+
+# ─── Config directories ───────────────────────────────────────────────────────
+export OS_CONFIG_DIR="${CONFIG_DIR}/os"
+export GUEST_CONFIG_DIR="${CONFIG_DIR}/guest"
+export DEFAULTS_ENV="${CONFIG_DIR}/defaults.env"
+
+# ─── Settings files (untracked — user-created from templates) ─────────────────
+export OPENSTACK_ENV="${SETTINGS_DIR}/openstack.env"
+export GUEST_ACCESS_ENV="${SETTINGS_DIR}/guest-access.env"
+
+# ─── Path helpers ─────────────────────────────────────────────────────────────
+
+# Return canonical state JSON path: runtime/state/<phase>/<os>-<ver>.json
+# Usage: core_state_json <phase> <os_family> <os_version>
+core_state_json() {
+  echo "${STATE_DIR}/${1}/${2}-${3}.json"
 }
 
-imagectl_ensure_core_dirs() {
-  mkdir -p \
-    "$SETTINGS_DIR" \
-    "$WORKSPACE_DIR" \
-    "$IMAGES_DIR" \
-    "$RUNTIME_DIR" \
-    "$STATE_DIR" \
-    "$LOG_DIR" \
-    "$MANIFESTS_DIR" \
-    "$UBUNTU_MANIFEST_DIR" \
-    "$OPENSTACK_MANIFEST_DIR" \
-    "$LEGACY_MANIFEST_DIR" \
-    "$LEGACY_UBUNTU_MANIFEST_DIR" \
-    "$LEGACY_OPENSTACK_MANIFEST_DIR"
+# Return canonical log file path: runtime/logs/<phase>/<os>-<ver>.log
+# Usage: core_log_path <phase> <os_family> <os_version>
+core_log_path() {
+  echo "${LOG_DIR}/${1}/${2}-${3}.log"
 }
 
-imagectl_auto_init_settings() {
-  local example_file
-  local target_file
+# Return canonical flag-file path: runtime/state/<phase>/<os>-<ver>.<flag>
+# Usage: core_flag_path <phase> <os_family> <os_version> <flag_name>
+core_flag_path() {
+  echo "${STATE_DIR}/${1}/${2}-${3}.${4}"
+}
 
-  # Bootstrap settings from examples if they don't exist
-  for example_file in "$SETTINGS_DIR"/*.example; do
-    [[ -f "$example_file" ]] || continue
-    target_file="${example_file%.example}"
-    if [[ ! -f "$target_file" ]]; then
-      cp "$example_file" "$target_file"
-      echo "INFO: Initialized missing local setting: $target_file (from example)" >&2
-    fi
+# Return canonical local image path
+# Usage: core_image_path <os_family> <os_version> <filename>
+core_image_path() {
+  echo "${IMAGES_DIR}/${1}/${2}/${3}"
+}
+
+# Ensure all required runtime directories exist (idempotent)
+core_ensure_runtime_dirs() {
+  local d
+  for d in \
+    "${STATE_SYNC_DIR}" "${STATE_IMPORT_DIR}" "${STATE_CREATE_DIR}" \
+    "${STATE_CONFIGURE_DIR}" "${STATE_CLEAN_DIR}" "${STATE_PUBLISH_DIR}" \
+    "${LOG_SYNC_DIR}" "${LOG_IMPORT_DIR}" "${LOG_CREATE_DIR}" \
+    "${LOG_CONFIGURE_DIR}" "${LOG_CLEAN_DIR}" "${LOG_PUBLISH_DIR}" \
+    "${IMAGES_DIR}/ubuntu" "${IMAGES_DIR}/debian" "${IMAGES_DIR}/rocky" \
+    "${IMAGES_DIR}/almalinux" "${IMAGES_DIR}/fedora"; do
+    [[ -d "$d" ]] || mkdir -p "$d"
   done
 }
-
-# Run initialization when sourced
-imagectl_init_core_paths
