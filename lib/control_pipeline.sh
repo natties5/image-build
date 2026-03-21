@@ -260,7 +260,10 @@ imagectl_auto_by_os() {
 
   imagectl_run_discover_for_os "$os"
   mapfile -t versions < <(imagectl_require_versions_from_manifest_remote "$os")
-  imagectl_runtime_prepare_for_full_pipeline
+  if ! imagectl_runtime_prepare_for_full_pipeline; then
+    imagectl_log "ERROR: runtime prepare failed — check settings/ files"
+    return 1
+  fi
 
   imagectl_log "auto-by-os start os=$os versions=${#versions[@]} fail_fast=$fail_fast"
   for version in "${versions[@]}"; do
@@ -307,7 +310,10 @@ imagectl_auto_by_os_version() {
 
   imagectl_run_discover_for_os "$os"
   mapfile -t versions < <(imagectl_require_versions_from_manifest_remote "$os")
-  imagectl_runtime_prepare_for_full_pipeline
+  if ! imagectl_runtime_prepare_for_full_pipeline; then
+    imagectl_log "ERROR: runtime prepare failed — check settings/ files"
+    return 1
+  fi
 
   if [[ -z "$version" ]]; then
     version="$(imagectl_select_from_list "Select version (os=$os)" "${versions[@]}")"
@@ -339,7 +345,6 @@ imagectl_pipeline_logs() {
 
 imagectl_pipeline_full_run() {
   imagectl_prepare_remote_pipeline_context
-  imagectl_runtime_prepare_for_full_pipeline
 
   local oses=() os versions=() version
   local -a results=()
@@ -349,6 +354,15 @@ imagectl_pipeline_full_run() {
     imagectl_os_is_implemented "$os" || continue
     imagectl_log "full-run: discover os=$os"
     imagectl_run_discover_for_os "$os"
+  done
+
+  if ! imagectl_runtime_prepare_for_full_pipeline; then
+    imagectl_log "ERROR: runtime prepare failed — check settings/ files"
+    return 1
+  fi
+
+  for os in "${oses[@]}"; do
+    imagectl_os_is_implemented "$os" || continue
     mapfile -t versions < <(imagectl_require_versions_from_manifest_remote "$os")
 
     for version in "${versions[@]}"; do
@@ -384,7 +398,10 @@ imagectl_pipeline_by_phase() {
   phase="$(imagectl_select_from_list "Select phase for $os $version" "${phases[@]}")"
 
   if imagectl_phase_is_mutating "$phase"; then
-    imagectl_runtime_prepare_for_action "$phase"
+    if ! imagectl_runtime_prepare_for_action "$phase"; then
+      imagectl_log "ERROR: runtime prepare failed for phase=$phase — check settings/ files"
+      return 1
+    fi
   fi
 
   imagectl_run_phase_remote "$os" "$phase" "$version"
@@ -507,10 +524,10 @@ imagectl_menu_run() {
       "Back            (กลับ)")"
 
     case "$choice" in
-      "Full Run"*)      imagectl_pipeline_full_run ;;
-      "By OS"*)         imagectl_auto_by_os ;;
-      "By Version"*)    imagectl_auto_by_os_version ;;
-      "By Phase"*)      imagectl_pipeline_by_phase ;;
+      "Full Run"*)      imagectl_pipeline_full_run    || imagectl_log "full-run ended with error" ;;
+      "By OS"*)         imagectl_auto_by_os            || imagectl_log "by-os ended with error" ;;
+      "By Version"*)    imagectl_auto_by_os_version    || imagectl_log "by-version ended with error" ;;
+      "By Phase"*)      imagectl_pipeline_by_phase     || imagectl_log "by-phase ended with error" ;;
       "Change Project"*)
         imagectl_select_project_interactive >/dev/null
         ;;

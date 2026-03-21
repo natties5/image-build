@@ -7,7 +7,15 @@
       "Bash(bash scripts/control.sh --help)",
       "Bash(bash -n lib/runtime_helpers.sh)",
       "Bash(bash -n lib/local_overrides.sh)",
-      "Bash(bash -n lib/control_status.sh)"
+      "Bash(bash -n lib/control_status.sh)",
+      "Bash(for f:*)",
+      "Bash(do)",
+      "Bash(if bash:*)",
+      "Bash(then)",
+      "Bash(echo \"PASS: $f\")",
+      "Bash(grep -rn PASSWORDs*=s*[''][^''] --include=*.sh --include=*.env .)",
+      "Bash(bash -n c:/Users/natti/Documents/git/image-build/lib/control_pipeline.sh)",
+      "Bash(bash -n c:/Users/natti/Documents/git/image-build/lib/control_main.sh)"
     ]
   }
 }

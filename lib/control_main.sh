@@ -78,12 +78,12 @@ imagectl_menu_system() {
       "Back           (กลับ)")"
 
     case "$choice" in
-      "SSH Connect"*)   imagectl_ssh_dispatch connect ;;
-      "SSH Validate"*)  imagectl_ssh_dispatch validate ;;
-      "SSH Info"*)      imagectl_ssh_dispatch info ;;
-      "Git Bootstrap"*) imagectl_git_dispatch bootstrap ;;
-      "Git Sync"*)      imagectl_git_dispatch sync-safe ;;
-      "Git Status"*)    imagectl_git_dispatch status ;;
+      "SSH Connect"*)   imagectl_ssh_dispatch connect   || imagectl_log "ssh connect failed" ;;
+      "SSH Validate"*)  imagectl_ssh_dispatch validate  || imagectl_log "ssh validate failed" ;;
+      "SSH Info"*)      imagectl_ssh_dispatch info      || imagectl_log "ssh info failed" ;;
+      "Git Bootstrap"*) imagectl_git_dispatch bootstrap || imagectl_log "git bootstrap failed" ;;
+      "Git Sync"*)      imagectl_git_dispatch sync-safe || imagectl_log "git sync failed" ;;
+      "Git Status"*)    imagectl_git_dispatch status    || imagectl_log "git status failed" ;;
       "Back"*)          break ;;
     esac
   done
