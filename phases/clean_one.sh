@@ -8,8 +8,8 @@ source "$REPO_ROOT/lib/local_overrides.sh"
 STATE_DIR="${STATE_DIR:-$REPO_ROOT/runtime/state}"
 LOG_DIR="${LOG_DIR:-$REPO_ROOT/logs}"
 CLEAN_STATE_DIR="${CLEAN_STATE_DIR:-$STATE_DIR/clean}"
-OPENRC_PATH_FILE="${OPENRC_PATH_FILE:-$REPO_ROOT/config/runtime/openrc.path}"
-CLEAN_CONFIG_FILE="${CLEAN_CONFIG_FILE:-$REPO_ROOT/config/control/clean.env}"
+OPENRC_PATH_FILE="${OPENRC_PATH_FILE:-$SETTINGS_DIR/openrc.env}"
+CLEAN_CONFIG_FILE="${CLEAN_CONFIG_FILE:-$SETTINGS_DIR/clean.env}"
 
 mkdir -p "$STATE_DIR" "$LOG_DIR" "$CLEAN_STATE_DIR"
 

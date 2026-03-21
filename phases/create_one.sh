@@ -10,10 +10,10 @@ source "$REPO_ROOT/lib/local_overrides.sh"
 imagectl_init_layout "$REPO_ROOT"
 imagectl_ensure_layout_dirs
 
-OPENSTACK_ENV_FILE="${OPENSTACK_ENV_FILE:-$REPO_ROOT/config/runtime/openstack.env}"
-GUEST_ENV_FILE="${GUEST_ENV_FILE:-$REPO_ROOT/config/guest/access.env}"
-LEGACY_GUEST_ENV_FILE="${REPO_ROOT}/config/guest/access.env"
-OPENRC_PATH_FILE="${OPENRC_PATH_FILE:-$REPO_ROOT/config/runtime/openrc.path}"
+OPENSTACK_ENV_FILE="${OPENSTACK_ENV_FILE:-$SETTINGS_DIR/openstack.env}"
+GUEST_ENV_FILE="${GUEST_ENV_FILE:-$SETTINGS_DIR/guest-access.env}"
+LEGACY_GUEST_ENV_FILE="${REPO_ROOT}/deploy/local/guest-access.env"
+OPENRC_PATH_FILE="${OPENRC_PATH_FILE:-$SETTINGS_DIR/openrc.env}"
 
 [[ -f "$OPENSTACK_ENV_FILE" ]] || { echo "missing config: $OPENSTACK_ENV_FILE" >&2; exit 1; }
 source "$OPENSTACK_ENV_FILE"

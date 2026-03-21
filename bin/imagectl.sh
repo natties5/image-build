@@ -8,6 +8,7 @@ REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 source "$REPO_ROOT/lib/layout.sh"
 imagectl_init_layout "$REPO_ROOT"
 imagectl_ensure_layout_dirs
+imagectl_auto_init_settings
 
 usage() {
   cat <<'EOF'

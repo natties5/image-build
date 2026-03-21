@@ -68,28 +68,20 @@ bin/imagectl.sh          ← entry point สำหรับรันบน jump 
 scripts/control.sh       ← entry point สำหรับ operator บน local
 
 phases/                  ← pipeline phase scripts (download, import, create, configure, clean, publish)
-lib/                     ← shared library functions
+lib/                     ← shared library functions (รวมถึง core_paths.sh)
 
-config/
-├── os/{ubuntu,debian,rocky,centos,almalinux}/
-│   ├── base.env         ← ค่า default ทุก version ของ OS นั้น
-│   └── {version}.env    ← override เฉพาะ version
-├── guest/
-│   ├── base.env         ← policy ใน VM (timezone, locale, upgrade, etc.)
-│   └── {os}-{version}.env
-├── openstack/
-│   ├── openrc.path      ← path ของ openrc file (override ใน deploy/local/)
-│   └── project-natties.env
-├── pipeline/
-│   ├── publish.env
-│   └── clean.env
-├── credentials/
-│   └── guest-access.env.example  ← template (ของจริงอยู่ใน deploy/local/ หรือ config/credentials/ ซึ่ง gitignored)
-└── jumphost/jumphost.env
+settings/                ← ข้อมูล configuration และ secrets ส่วนตัว (gitignored ทั้งหมด)
+                         มีการจำลองไฟล์จาก *.example อัตโนมัติเมื่อรันครั้งแรก
+├── openstack.env        ← OpenStack credentials
+├── openrc.env           ← path ไปยัง openrc file
+├── guest-access.env     ← ข้อมูลสำหรับเข้าถึง Guest VM
+└── ...
+
+config/                  ← tracked system defaults และ reusable rules
 
 deploy/
-├── local/               ← gitignored ทั้งหมด (SSH key, local config)
-└── *.example            ← template สำหรับ copy ไปใส่ใน deploy/local/
+├── local/               ← (Legacy) ย้ายไปใช้โฟลเดอร์ settings/ เป็นหลัก
+└── *.example            ← template สำหรับการอ้างอิง
 
 manifests/               ← runtime artifacts (gitignored ยกเว้น .gitkeep)
 runtime/state/           ← state ของแต่ละ phase (gitignored)

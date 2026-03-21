@@ -8,7 +8,7 @@ source "$REPO_ROOT/lib/layout.sh"
 imagectl_init_layout "$REPO_ROOT"
 imagectl_ensure_layout_dirs
 
-CONFIG_FILE="${1:-$REPO_ROOT/config/os/ubuntu.env}"
+CONFIG_FILE="${1:-$SETTINGS_DIR/ubuntu.env}"
 LEGACY_CONFIG_FILE="${REPO_ROOT}/config/control/source.env"
 
 if [[ -f "$CONFIG_FILE" ]]; then

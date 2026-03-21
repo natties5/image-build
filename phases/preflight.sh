@@ -10,9 +10,9 @@ source "$REPO_ROOT/lib/local_overrides.sh"
 imagectl_init_layout "$REPO_ROOT"
 imagectl_ensure_layout_dirs
 
-OPENSTACK_ENV_FILE="${OPENSTACK_ENV_FILE:-$REPO_ROOT/config/runtime/openstack.env}"
-OPENRC_PATH_FILE="${OPENRC_PATH_FILE:-$REPO_ROOT/config/runtime/openrc.path}"
-PUBLISH_CONFIG_FILE="${PUBLISH_CONFIG_FILE:-$REPO_ROOT/config/control/publish.env}"
+OPENSTACK_ENV_FILE="${OPENSTACK_ENV_FILE:-$SETTINGS_DIR/openstack.env}"
+OPENRC_PATH_FILE="${OPENRC_PATH_FILE:-$SETTINGS_DIR/openrc.env}"
+PUBLISH_CONFIG_FILE="${PUBLISH_CONFIG_FILE:-$SETTINGS_DIR/publish.env}"
 
 EXPECTED_PROJECT_NAME="${EXPECTED_PROJECT_NAME:-}"
 EXPECTED_IMAGE_PREFIX="${EXPECTED_IMAGE_PREFIX:-ubuntu-}"
