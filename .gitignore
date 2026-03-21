@@ -1,5 +1,5 @@
 # Settings (private - never commit)
-settings/
+settings/**
 !settings/*.env.example
 !settings/README.md
 
