@@ -143,6 +143,53 @@ menu_settings() {
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Auto-select openrc by environment (Linux=internalURL, other=publicURL)
+# Returns path via printf; returns 1 if cannot auto-select (fall back to list).
+# ──────────────────────────────────────────────────────────────────────────────
+_auto_select_openrc() {
+  local openrc_dir="$1"
+  local files=()
+  local f
+  for f in "${openrc_dir}"/*.sh "${openrc_dir}"/*.env "${openrc_dir}"/*.rc; do
+    [[ -f "$f" ]] && files+=("$f") || true
+  done
+
+  local count="${#files[@]}"
+  [[ "$count" -eq 0 ]] && return 1
+
+  # Only 1 file → use it regardless
+  if [[ "$count" -eq 1 ]]; then
+    printf '%s' "${files[0]}"
+    return 0
+  fi
+
+  # Multiple files → detect environment
+  local is_linux=false
+  [[ "$(uname -s)" == "Linux" ]] && is_linux=true
+
+  local preferred=""
+  for f in "${files[@]}"; do
+    local content
+    content=$(grep -v 'PASSWORD\|SECRET' "$f" 2>/dev/null || true)
+    if $is_linux && echo "$content" | grep -qi 'internalURL\|internal'; then
+      preferred="$f"
+      break
+    elif ! $is_linux && ! echo "$content" | grep -qi 'internalURL\|internal'; then
+      preferred="$f"
+      break
+    fi
+  done
+
+  if [[ -n "$preferred" ]]; then
+    echo "  [auto-select] environment=$(uname -s) → $(basename "$preferred")" >&2
+    printf '%s' "$preferred"
+    return 0
+  fi
+
+  return 1
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
 # OPTION 1 — Load OpenRC & Validate Auth
 # ──────────────────────────────────────────────────────────────────────────────
 _settings_load_openrc() {
@@ -166,22 +213,31 @@ _settings_load_openrc() {
     selected_openrc="${files[0]}"
     echo "  Auto-selected: $(basename "$selected_openrc")"
   else
-    echo "  Select OpenRC profile:"
-    local i=1
-    for f in "${files[@]}"; do
-      printf "    %d) %s\n" "$i" "$(basename "$f")"
-      (( i++ )) || true
-    done
-    echo -n "  Select [1-${#files[@]}]: "
-    local choice; read -r choice || return 1
-    if ! [[ "$choice" =~ ^[0-9]+$ ]]; then
-      echo "  Invalid selection."; return 1
+    # Try environment-based auto-selection first (stderr → terminal for status msg)
+    local auto_path
+    auto_path=$(_auto_select_openrc "$openrc_dir") || true
+
+    if [[ -n "$auto_path" && -f "$auto_path" ]]; then
+      selected_openrc="$auto_path"
+      echo "  Auto-selected: $(basename "$selected_openrc") [environment=$(uname -s)]"
+    else
+      echo "  Select OpenRC profile:"
+      local i=1
+      for f in "${files[@]}"; do
+        printf "    %d) %s\n" "$i" "$(basename "$f")"
+        (( i++ )) || true
+      done
+      echo -n "  Select [1-${#files[@]}]: "
+      local choice; read -r choice || return 1
+      if ! [[ "$choice" =~ ^[0-9]+$ ]]; then
+        echo "  Invalid selection."; return 1
+      fi
+      local idx=$(( choice - 1 ))
+      if [[ $idx -lt 0 ]] || [[ $idx -ge ${#files[@]} ]]; then
+        echo "  Invalid selection."; return 1
+      fi
+      selected_openrc="${files[$idx]}"
     fi
-    local idx=$(( choice - 1 ))
-    if [[ $idx -lt 0 ]] || [[ $idx -ge ${#files[@]} ]]; then
-      echo "  Invalid selection."; return 1
-    fi
-    selected_openrc="${files[$idx]}"
   fi
 
   # Step B: source the selected file
