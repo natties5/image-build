@@ -363,20 +363,37 @@ os_attach_floating_ip() {
 # ─── Final image publish operations ───────────────────────────────────────────
 
 # Upload a volume as a new Glance image
+# Note: --property and --private are not supported with --volume on most OpenStack versions.
+# We create the image first, then set properties and visibility in a second step.
 # Usage: os_upload_volume_to_image <volume_id> <image_name> <os_distro> <os_version>
 os_upload_volume_to_image() {
   local vol_id="$1" name="$2" distro="$3" ver="$4"
   util_log_info "Uploading volume $vol_id as image: $name"
-  openstack_cmd image create \
+  # Step 1: create image from volume (no --property or --private here)
+  local img_id
+  img_id="$(openstack_cmd image create \
     --disk-format qcow2 \
     --container-format bare \
     --volume "$vol_id" \
+    "$name" \
+    -f value -c id 2>/dev/null)" || true
+  if [[ -z "$img_id" ]]; then
+    util_log_warn "image create returned empty id — searching by name..."
+    img_id="$(os_find_image_id_by_name "$name" 2>/dev/null || echo '')"
+  fi
+  if [[ -z "$img_id" ]]; then
+    util_log_error "os_upload_volume_to_image: failed to get image ID"
+    return 1
+  fi
+  util_log_info "Image created from volume: $img_id — setting metadata..."
+  # Step 2: set properties and visibility
+  openstack_cmd image set \
     --property os_distro="$distro" \
     --property os_version="$ver" \
     --property pipeline_stage=complete \
     --private \
-    "$name" \
-    -f value -c id 2>/dev/null
+    "$img_id" 2>/dev/null || true
+  echo "$img_id"
 }
 
 # Find image ID by name, polling until it appears (for volume-upload which creates asynchronously)
