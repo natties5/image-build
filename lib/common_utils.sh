@@ -261,6 +261,30 @@ _sync_select_version() {
   echo "${versions[$idx]%% *}"
 }
 
+# ─── Python detection ─────────────────────────────────────────────────────────
+# Find a working Python interpreter (avoids Windows MS Store stub).
+# Returns the command name via stdout; returns empty string if none found.
+_detect_python() {
+  # Honour PYTHON3 if already set and working (e.g. by _setup_windows_python_path)
+  if [[ -n "${PYTHON3:-}" ]]; then
+    if "${PYTHON3}" -c "import sys; sys.exit(0)" 2>/dev/null; then
+      printf '%s' "${PYTHON3}"
+      return
+    fi
+  fi
+  local py="" c
+  for c in python3 python py; do
+    if command -v "$c" >/dev/null 2>&1; then
+      # Actually execute — Windows "python3" may exist but open the Store
+      if "$c" -c "import sys; sys.exit(0)" 2>/dev/null; then
+        py="$c"
+        break
+      fi
+    fi
+  done
+  printf '%s' "$py"
+}
+
 # ─── JSON helpers ─────────────────────────────────────────────────────────────
 # Escape a string for embedding in a JSON value (double-quotes, backslashes, newlines)
 json_escape() {

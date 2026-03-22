@@ -290,270 +290,437 @@ _settings_select_resources() {
     return 1
   fi
 
-  # Helper: parse JSON array from openstack_cmd, show numbered list,
-  # return chosen index. Prints chosen line to stdout.
-  # Usage: _pick_from_json <json_string> <col1_key> [col2_key] [col3_key]
-  _os_pick_item() {
+  # Detect working Python once — avoids Windows MS Store stub triggering installer
+  local PYTHON3
+  PYTHON3=$(_detect_python)
+
+  # Print a reference table from a JSON array using python.
+  # Usage: _print_ref_table <json> <Header1> [Header2 ...]
+  _print_ref_table() {
     local json="$1"; shift
-    local keys=("$@")
-    # Resolve Python: prefer PYTHON3 env (set by _setup_windows_python_path),
-    # then python3, then python — skip Windows Store stubs (they exit 9009)
-    local py_cmd="${PYTHON3:-}"
-    if [[ -z "$py_cmd" ]]; then
-      local _c
-      for _c in python3 python; do
-        if command -v "$_c" >/dev/null 2>&1; then
-          # Skip Windows App Execution Alias stubs
-          if "$_c" --version >/dev/null 2>&1; then
-            py_cmd="$_c"; break
-          fi
-        fi
-      done
+    if [[ -z "$PYTHON3" ]]; then
+      echo "  (python not available — cannot display table)"
+      return
     fi
-    if [[ -z "$py_cmd" ]]; then
-      echo "  ERROR: python3/python not found. Install python-openstackclient first." >&2; return 1
-    fi
-    local items
-    items=$(PYTHONUTF8=1 PYTHONIOENCODING=utf-8 $py_cmd - "$json" "${keys[@]}" <<'PYEOF'
+    PYTHONUTF8=1 PYTHONIOENCODING=utf-8 "$PYTHON3" - "$json" "$@" <<'PYEOF'
 import sys, json, io
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 data = json.loads(sys.argv[1])
 keys = sys.argv[2:]
+widths = [len(k) for k in keys]
+rows = []
 for item in data:
     row = []
     for k in keys:
-        # case-insensitive key lookup
+        val = "-"
         for dk in item:
             if dk.lower() == k.lower():
-                row.append(str(item[dk]))
+                val = str(item[dk])
                 break
-        else:
-            row.append("-")
-    print("\t".join(row))
+        row.append(val)
+    rows.append(row)
+    for i, v in enumerate(row):
+        widths[i] = max(widths[i], len(v))
+sep = "  " + "─" * (sum(widths) + 3 * max(len(keys) - 1, 0) + 4)
+hdr = "  " + "  ".join(k.ljust(widths[i]) for i, k in enumerate(keys))
+print(sep)
+print(hdr)
+print(sep)
+for row in rows:
+    print("  " + "  ".join(v.ljust(widths[i]) for i, v in enumerate(row)))
+print(sep)
 PYEOF
-    ) || { echo "  ERROR: JSON parse failed" >&2; return 1; }
-    if [[ -z "$items" ]]; then
-      echo "  (no items returned)" >&2; return 1
-    fi
-    local lines=()
-    while IFS= read -r line; do
-      lines+=("$line")
-    done <<< "$items"
-    local i=1
-    for line in "${lines[@]}"; do
-      printf "    %d) %s\n" "$i" "$(echo "$line" | tr '\t' ' | ')" >&2
-      (( i++ )) || true
-    done
-    printf "  Select [1-%d]: " "${#lines[@]}" >&2
-    local choice; read -r choice || return 1
-    if ! [[ "$choice" =~ ^[0-9]+$ ]]; then
-      echo "  Invalid selection." >&2; return 1
-    fi
-    local idx=$(( choice - 1 ))
-    if [[ $idx -lt 0 ]] || [[ $idx -ge ${#lines[@]} ]]; then
-      echo "  Invalid selection." >&2; return 1
-    fi
-    echo "${lines[$idx]}"
   }
+
+  # Look up a field value from a JSON array given an input string (name or ID).
+  # Usage: _json_lookup <json> <input> <search_key> <return_key>
+  _json_lookup() {
+    local json="$1" input="$2" skey="$3" rkey="$4"
+    [[ -z "$PYTHON3" ]] && { printf ''; return; }
+    PYTHONUTF8=1 PYTHONIOENCODING=utf-8 "$PYTHON3" - "$json" "$input" "$skey" "$rkey" <<'PYEOF'
+import sys, json
+data = json.loads(sys.argv[1])
+inp, skey, rkey = sys.argv[2], sys.argv[3], sys.argv[4]
+for item in data:
+    for dk in item:
+        if dk.lower() == skey.lower():
+            val = str(item[dk])
+            if val == inp or val.lower() == inp.lower():
+                for rdk in item:
+                    if rdk.lower() == rkey.lower():
+                        print(str(item[rdk]))
+                        sys.exit(0)
+print("")
+PYEOF
+  }
+
+  # Check if input matches any value in a JSON array. Returns 0 if found.
+  _json_has_item() {
+    local json="$1" input="$2"
+    [[ -z "$PYTHON3" ]] && return 1
+    local result
+    result=$(PYTHONUTF8=1 PYTHONIOENCODING=utf-8 "$PYTHON3" - "$json" "$input" <<'PYEOF'
+import sys, json
+data = json.loads(sys.argv[1])
+inp = sys.argv[2]
+for item in data:
+    for dk in item:
+        val = str(item[dk])
+        if val == inp or val.lower() == inp.lower():
+            print("found")
+            sys.exit(0)
+print("notfound")
+PYEOF
+    ) || result="notfound"
+    [[ "$result" == "found" ]]
+  }
+
+  # Load current saved values so empty Enter keeps them unchanged
+  local cur_proj_name="" cur_proj_id="" cur_net_name="" cur_net_id=""
+  local cur_flavor_name="" cur_flavor_id="" cur_volume_type=""
+  local cur_sg="" cur_float_net="" cur_float_net_id="" cur_key_name=""
+  if [[ -f "$OPENSTACK_ENV" ]]; then
+    # shellcheck disable=SC1090
+    source "$OPENSTACK_ENV" 2>/dev/null || true
+    cur_proj_name="${OS_PROJECT_NAME:-}"
+    cur_proj_id="${OS_PROJECT_ID:-}"
+    cur_net_name="${NETWORK_NAME:-}"
+    cur_net_id="${NETWORK_ID:-}"
+    cur_flavor_name="${FLAVOR_NAME:-}"
+    cur_flavor_id="${FLAVOR_ID:-}"
+    cur_volume_type="${VOLUME_TYPE:-}"
+    cur_sg="${SECURITY_GROUP:-}"
+    cur_float_net="${FLOATING_NETWORK:-}"
+    cur_float_net_id="${FLOATING_NETWORK_ID:-}"
+    cur_key_name="${KEY_NAME:-}"
+  fi
 
   local env_out=""
 
-  # 2a) Select Project
+  # ── 2a) Project ──────────────────────────────────────────────────────────────
   echo ""
   echo "  Fetching projects..."
   local proj_json
   proj_json=$(openstack_cmd project list -f json 2>/dev/null) || proj_json="[]"
-  echo "  Select Project (name | id):"
-  local proj_line
-  if proj_line=$(_os_pick_item "$proj_json" "Name" "ID"); then
-    local proj_name proj_id
-    proj_name=$(echo "$proj_line" | cut -f1)
-    proj_id=$(echo "$proj_line" | cut -f2)
-    env_out+="OS_PROJECT_NAME=\"${proj_name}\"\n"
-    env_out+="OS_PROJECT_ID=\"${proj_id}\"\n"
-    # Export immediately so steps 2b-2f can use --project filter
+  echo ""
+  echo "  Available projects:"
+  _print_ref_table "$proj_json" "Name" "ID"
+  echo ""
+  if [[ -n "$cur_proj_name" ]]; then
+    printf "  Enter project name or ID (or press Enter to keep: %s): " "$cur_proj_name"
+  else
+    printf "  Enter project name or ID (or press Enter to skip): "
+  fi
+  local proj_input; read -r proj_input || proj_input=""
+
+  local proj_name="$cur_proj_name" proj_id="$cur_proj_id"
+  if [[ -n "$proj_input" ]]; then
+    local fid fname
+    fid=$(_json_lookup "$proj_json" "$proj_input" "Name" "ID")
+    fname=$(_json_lookup "$proj_json" "$proj_input" "Name" "Name")
+    if [[ -z "$fid" ]]; then
+      fid=$(_json_lookup "$proj_json" "$proj_input" "ID" "ID")
+      fname=$(_json_lookup "$proj_json" "$proj_input" "ID" "Name")
+    fi
+    if [[ -n "$fid" ]]; then
+      proj_id="$fid"; proj_name="${fname:-$proj_input}"
+      echo "  Selected project: ${proj_name} (${proj_id})"
+    else
+      echo "  Warning: '${proj_input}' not found in list — saving as-is"
+      proj_name="$proj_input"; proj_id="$proj_input"
+    fi
     export OS_PROJECT_ID="$proj_id"
     export OS_PROJECT_NAME="$proj_name"
-    echo "  Selected project: ${proj_name} (${proj_id})"
   else
-    echo "  Skipping project selection."
+    [[ -n "$cur_proj_name" ]] && echo "  (kept: ${cur_proj_name})" || echo "  Skipping project selection."
+    [[ -n "$proj_id" ]]   && export OS_PROJECT_ID="$proj_id"   || true
+    [[ -n "$proj_name" ]] && export OS_PROJECT_NAME="$proj_name" || true
   fi
+  env_out+="OS_PROJECT_NAME=\"${proj_name}\"\n"
+  env_out+="OS_PROJECT_ID=\"${proj_id}\"\n"
 
-  # 2b) Select Network (project-scoped + external/shared, deduplicated by ID)
+  # ── 2b) Network ──────────────────────────────────────────────────────────────
   echo ""
   echo "  Fetching networks..."
-  local net_project_json net_external_json net_merged_json
-  net_project_json=$(openstack_cmd network list \
-    --project "${OS_PROJECT_ID:-}" -f json 2>/dev/null) || net_project_json="[]"
-  net_external_json=$(openstack_cmd network list \
-    --external -f json 2>/dev/null) || net_external_json="[]"
-  net_merged_json=$(python3 - "$net_project_json" "$net_external_json" <<'PYEOF_NET'
+  local net_proj_json net_ext_json net_merged_json
+  net_proj_json=$(openstack_cmd network list \
+    --project "${OS_PROJECT_ID:-}" -f json 2>/dev/null) || net_proj_json="[]"
+  net_ext_json=$(openstack_cmd network list \
+    --external -f json 2>/dev/null) || net_ext_json="[]"
+  if [[ -n "$PYTHON3" ]]; then
+    net_merged_json=$("$PYTHON3" - "$net_proj_json" "$net_ext_json" <<'PYEOF_NET'
 import sys, json
-a = json.loads(sys.argv[1])
-b = json.loads(sys.argv[2])
-seen = set()
-merged = []
+a = json.loads(sys.argv[1]); b = json.loads(sys.argv[2])
+seen = set(); merged = []
 for item in a + b:
     nid = item.get("ID") or item.get("id") or ""
     if nid not in seen:
-        seen.add(nid)
-        merged.append(item)
+        seen.add(nid); merged.append(item)
 print(json.dumps(merged))
 PYEOF_NET
-  ) || net_merged_json="$net_project_json"
-  echo "  Select Network (name | id | status):"
-  local net_line
-  if net_line=$(_os_pick_item "$net_merged_json" "Name" "ID" "Status"); then
-    local net_name net_id
-    net_name=$(echo "$net_line" | cut -f1)
-    net_id=$(echo "$net_line" | cut -f2)
-    env_out+="NETWORK_ID=\"${net_id}\"\n"
-    env_out+="NETWORK_NAME=\"${net_name}\"\n"
-    echo "  Selected network: ${net_name} (${net_id})"
+    ) || net_merged_json="$net_proj_json"
   else
-    echo "  Skipping network selection."
+    net_merged_json="$net_proj_json"
+    echo "  Note: python not available — network list may contain duplicates"
   fi
+  echo ""
+  echo "  Available networks:"
+  _print_ref_table "$net_merged_json" "Name" "ID" "Status"
+  echo ""
+  if [[ -n "$cur_net_name" ]]; then
+    printf "  Enter network name or ID (or press Enter to keep: %s): " "$cur_net_name"
+  else
+    printf "  Enter network name or ID (or press Enter to skip): "
+  fi
+  local net_input; read -r net_input || net_input=""
 
-  # 2c) Select Flavor
+  local net_name="$cur_net_name" net_id="$cur_net_id"
+  if [[ -n "$net_input" ]]; then
+    local fnid fnname
+    fnid=$(_json_lookup "$net_merged_json" "$net_input" "Name" "ID")
+    fnname=$(_json_lookup "$net_merged_json" "$net_input" "Name" "Name")
+    if [[ -z "$fnid" ]]; then
+      fnid=$(_json_lookup "$net_merged_json" "$net_input" "ID" "ID")
+      fnname=$(_json_lookup "$net_merged_json" "$net_input" "ID" "Name")
+    fi
+    if [[ -n "$fnid" ]]; then
+      net_id="$fnid"; net_name="${fnname:-$net_input}"
+      echo "  Selected network: ${net_name} (${net_id})"
+    else
+      echo "  Warning: '${net_input}' not found in list — saving as-is"
+      net_name="$net_input"; net_id="$net_input"
+    fi
+  else
+    [[ -n "$cur_net_name" ]] && echo "  (kept: ${cur_net_name})" || echo "  Skipping network selection."
+  fi
+  env_out+="NETWORK_ID=\"${net_id}\"\n"
+  env_out+="NETWORK_NAME=\"${net_name}\"\n"
+
+  # ── 2c) Flavor ───────────────────────────────────────────────────────────────
   echo ""
   echo "  Fetching flavors..."
   local flavor_json
   flavor_json=$(openstack_cmd flavor list -f json 2>/dev/null) || flavor_json="[]"
-  echo "  Select Flavor (name | vcpus | ram | disk):"
-  local flavor_line
-  if flavor_line=$(_os_pick_item "$flavor_json" "Name" "VCPUs" "RAM" "Disk"); then
-    local flavor_name flavor_vcpus
-    flavor_name=$(echo "$flavor_line" | cut -f1)
-    flavor_vcpus=$(echo "$flavor_line" | cut -f2)
-    local flavor_id
-    flavor_id=$(openstack_cmd flavor show "$flavor_name" -f value -c id 2>/dev/null) || flavor_id=""
-    env_out+="FLAVOR_ID=\"${flavor_id}\"\n"
-    env_out+="FLAVOR_NAME=\"${flavor_name}\"\n"
-    echo "  Selected flavor: ${flavor_name} (${flavor_vcpus} vCPUs)"
+  echo ""
+  echo "  Available flavors:"
+  _print_ref_table "$flavor_json" "Name" "VCPUs" "RAM" "Disk" "ID"
+  echo ""
+  if [[ -n "$cur_flavor_name" ]]; then
+    printf "  Enter flavor name or ID (or press Enter to keep: %s): " "$cur_flavor_name"
   else
-    echo "  Skipping flavor selection."
+    printf "  Enter flavor name or ID (or press Enter to skip): "
   fi
+  local flavor_input; read -r flavor_input || flavor_input=""
 
-  # 2d) Select Volume Type (two-attempt + manual fallback)
+  local flavor_name="$cur_flavor_name" flavor_id="$cur_flavor_id"
+  if [[ -n "$flavor_input" ]]; then
+    local ffid ffname
+    ffid=$(_json_lookup "$flavor_json" "$flavor_input" "Name" "ID")
+    ffname=$(_json_lookup "$flavor_json" "$flavor_input" "Name" "Name")
+    if [[ -z "$ffid" ]]; then
+      ffid=$(_json_lookup "$flavor_json" "$flavor_input" "ID" "ID")
+      ffname=$(_json_lookup "$flavor_json" "$flavor_input" "ID" "Name")
+    fi
+    if [[ -n "$ffid" ]]; then
+      flavor_id="$ffid"; flavor_name="${ffname:-$flavor_input}"
+      echo "  Selected flavor: ${flavor_name} (ID: ${flavor_id})"
+    else
+      echo "  Warning: '${flavor_input}' not found in list — saving as-is"
+      flavor_name="$flavor_input"; flavor_id="$flavor_input"
+    fi
+  else
+    [[ -n "$cur_flavor_name" ]] && echo "  (kept: ${cur_flavor_name})" || echo "  Skipping flavor selection."
+  fi
+  env_out+="FLAVOR_ID=\"${flavor_id}\"\n"
+  env_out+="FLAVOR_NAME=\"${flavor_name}\"\n"
+
+  # ── 2d) Volume Type ──────────────────────────────────────────────────────────
   echo ""
   echo "  Fetching volume types..."
   local voltype_json=""
-  # Attempt 1: with project scope
   voltype_json=$(openstack_cmd volume type list \
     --os-project-id "${OS_PROJECT_ID:-}" -f json 2>/dev/null) || voltype_json="[]"
   local voltype_count=0
-  voltype_count=$(python3 -c 'import sys,json; print(len(json.load(sys.stdin)))' \
-    <<< "$voltype_json" 2>/dev/null) || voltype_count=0
-  # Attempt 2: without scope if attempt 1 returned empty
-  if [[ "$voltype_count" == "0" ]]; then
-    voltype_json=$(openstack_cmd volume type list -f json 2>/dev/null) || voltype_json="[]"
-    voltype_count=$(python3 -c 'import sys,json; print(len(json.load(sys.stdin)))' \
+  if [[ -n "$PYTHON3" ]]; then
+    voltype_count=$("$PYTHON3" -c 'import sys,json; print(len(json.load(sys.stdin)))' \
       <<< "$voltype_json" 2>/dev/null) || voltype_count=0
   fi
-  echo "  Select Volume Type (name | id):"
-  local voltype_line=""
-  if [[ "$voltype_count" -gt 0 ]] && voltype_line=$(_os_pick_item "$voltype_json" "Name" "ID"); then
-    local voltype_name
-    voltype_name=$(echo "$voltype_line" | cut -f1)
-    env_out+="VOLUME_TYPE=\"${voltype_name}\"\n"
-    echo "  Selected volume type: ${voltype_name}"
-  else
-    # Attempt 3: manual text input
-    echo "  Volume type list unavailable. Enter volume type name manually,"
-    echo "  or press Enter to skip:"
-    echo -n "  Volume type: "
-    local manual_voltype=""
-    read -r manual_voltype || manual_voltype=""
-    if [[ -n "$manual_voltype" ]]; then
-      env_out+="VOLUME_TYPE=\"${manual_voltype}\"\n"
-      echo "  Volume type set to: ${manual_voltype}"
-    else
-      echo "  Skipping volume type."
+  if [[ "$voltype_count" == "0" ]]; then
+    voltype_json=$(openstack_cmd volume type list -f json 2>/dev/null) || voltype_json="[]"
+    if [[ -n "$PYTHON3" ]]; then
+      voltype_count=$("$PYTHON3" -c 'import sys,json; print(len(json.load(sys.stdin)))' \
+        <<< "$voltype_json" 2>/dev/null) || voltype_count=0
     fi
   fi
 
-  # 2e) Select Security Group (project-scoped with unscoped fallback)
+  local volume_type="$cur_volume_type"
+  if [[ "$voltype_count" -gt 0 ]]; then
+    echo ""
+    echo "  Available volume types:"
+    _print_ref_table "$voltype_json" "Name" "ID"
+    echo ""
+    if [[ -n "$cur_volume_type" ]]; then
+      printf "  Enter volume type name or ID (or press Enter to keep: %s): " "$cur_volume_type"
+    else
+      printf "  Enter volume type name (or press Enter to skip): "
+    fi
+    local vt_input; read -r vt_input || vt_input=""
+    if [[ -n "$vt_input" ]]; then
+      if _json_has_item "$voltype_json" "$vt_input"; then
+        local rvt
+        rvt=$(_json_lookup "$voltype_json" "$vt_input" "Name" "Name")
+        [[ -z "$rvt" ]] && rvt=$(_json_lookup "$voltype_json" "$vt_input" "ID" "Name")
+        volume_type="${rvt:-$vt_input}"
+        echo "  Selected volume type: ${volume_type}"
+      else
+        echo "  Warning: '${vt_input}' not found in list — saving as-is"
+        volume_type="$vt_input"
+      fi
+    else
+      [[ -n "$cur_volume_type" ]] && echo "  (kept: ${cur_volume_type})" || echo "  Skipping volume type."
+    fi
+  else
+    echo "  Volume type list unavailable. Enter volume type name manually,"
+    if [[ -n "$cur_volume_type" ]]; then
+      printf "  or press Enter to keep (%s): " "$cur_volume_type"
+    else
+      echo "  or press Enter to skip:"
+      echo -n "  Volume type: "
+    fi
+    local manual_vt=""
+    read -r manual_vt || manual_vt=""
+    if [[ -n "$manual_vt" ]]; then
+      volume_type="$manual_vt"
+      echo "  Volume type set to: ${volume_type}"
+    else
+      [[ -n "$cur_volume_type" ]] && echo "  (kept: ${cur_volume_type})" || echo "  Skipping volume type."
+    fi
+  fi
+  env_out+="VOLUME_TYPE=\"${volume_type}\"\n"
+
+  # ── 2e) Security Group (client-side project filter) ───────────────────────────
   echo ""
   echo "  Fetching security groups..."
-  local sg_json
-  sg_json=$(openstack_cmd security group list \
-    --project "${OS_PROJECT_ID:-}" -f json 2>/dev/null) || sg_json="[]"
-  # Fallback to unscoped if project-scoped returned empty
-  local sg_count=0
-  sg_count=$(python3 -c 'import sys,json; print(len(json.load(sys.stdin)))' \
-    <<< "$sg_json" 2>/dev/null) || sg_count=0
-  if [[ "$sg_count" == "0" ]]; then
-    sg_json=$(openstack_cmd security group list -f json 2>/dev/null) || sg_json="[]"
-  fi
-  echo "  Select Security Group (name | description):"
-  local sg_line
-  if sg_line=$(_os_pick_item "$sg_json" "Name" "Description"); then
-    local sg_name
-    sg_name=$(echo "$sg_line" | cut -f1)
-    env_out+="SECURITY_GROUP=\"${sg_name}\"\n"
-    echo "  Selected security group: ${sg_name}"
+  local sg_all_json sg_json
+  sg_all_json=$(openstack_cmd security group list -f json 2>/dev/null) || sg_all_json="[]"
+  if [[ -n "$PYTHON3" ]] && [[ -n "${OS_PROJECT_ID:-}" ]]; then
+    sg_json=$(PYTHONUTF8=1 "$PYTHON3" - "$sg_all_json" "${OS_PROJECT_ID}" <<'PYEOF_SG'
+import sys, json
+data = json.loads(sys.argv[1]); proj_id = sys.argv[2]
+filtered = [item for item in data
+            if str(item.get("Project","") or item.get("project_id","") or "").lower()
+               in (proj_id.lower(), "")
+            or item.get("Project") is None]
+result = filtered if filtered else data
+print(json.dumps(result))
+PYEOF_SG
+    ) || sg_json="$sg_all_json"
+    local sg_count=0
+    sg_count=$("$PYTHON3" -c 'import sys,json; print(len(json.load(sys.stdin)))' \
+      <<< "$sg_json" 2>/dev/null) || sg_count=0
+    [[ "$sg_count" == "0" ]] && sg_json="$sg_all_json"
   else
-    echo "  Skipping security group selection."
+    sg_json="$sg_all_json"
   fi
+  echo ""
+  echo "  Available security groups:"
+  _print_ref_table "$sg_json" "Name" "Description"
+  echo ""
+  if [[ -n "$cur_sg" ]]; then
+    printf "  Enter security group name (or press Enter to keep: %s): " "$cur_sg"
+  else
+    printf "  Enter security group name (or press Enter to skip): "
+  fi
+  local sg_input; read -r sg_input || sg_input=""
 
-  # 2f) Select Floating Network (optional)
+  local security_group="$cur_sg"
+  if [[ -n "$sg_input" ]]; then
+    if _json_has_item "$sg_json" "$sg_input"; then
+      local rsg
+      rsg=$(_json_lookup "$sg_json" "$sg_input" "Name" "Name")
+      security_group="${rsg:-$sg_input}"
+      echo "  Selected security group: ${security_group}"
+    else
+      echo "  Warning: '${sg_input}' not found in list — saving as-is"
+      security_group="$sg_input"
+    fi
+  else
+    [[ -n "$cur_sg" ]] && echo "  (kept: ${cur_sg})" || echo "  Skipping security group."
+  fi
+  env_out+="SECURITY_GROUP=\"${security_group}\"\n"
+
+  # ── 2e.5) SSH Keypair ────────────────────────────────────────────────────────
+  echo ""
+  echo "  Fetching keypairs..."
+  local keypair_json
+  keypair_json=$(openstack_cmd keypair list -f json 2>/dev/null) || keypair_json="[]"
+  echo ""
+  echo "  Available keypairs:"
+  _print_ref_table "$keypair_json" "Name" "Fingerprint"
+  echo ""
+  if [[ -n "$cur_key_name" ]]; then
+    printf "  Enter keypair name (or press Enter to keep: %s): " "$cur_key_name"
+  else
+    printf "  Enter keypair name (or press Enter to skip): "
+  fi
+  local key_input; read -r key_input || key_input=""
+
+  local key_name="$cur_key_name"
+  if [[ -n "$key_input" ]]; then
+    if _json_has_item "$keypair_json" "$key_input"; then
+      local rkey
+      rkey=$(_json_lookup "$keypair_json" "$key_input" "Name" "Name")
+      key_name="${rkey:-$key_input}"
+      echo "  Selected keypair: ${key_name}"
+    else
+      echo "  Warning: '${key_input}' not found in list — saving as-is"
+      key_name="$key_input"
+    fi
+  else
+    [[ -n "$cur_key_name" ]] && echo "  (kept: ${cur_key_name})" || echo "  Skipping keypair (will use password auth)."
+  fi
+  env_out+="KEY_NAME=\"${key_name}\"\n"
+
+  # ── 2f) Floating Network ─────────────────────────────────────────────────────
   echo ""
   echo "  Fetching external networks (for floating IP)..."
   local extnet_json
   extnet_json=$(openstack_cmd network list --external -f json 2>/dev/null) || extnet_json="[]"
-  echo "  Select Floating Network (name | id):"
-  echo "    0) Skip (no floating IP)"
-  local extnet_line=""
-  local ext_choice
-  # Show list then read
-  local ext_lines=()
-  local py_cmd2="${PYTHON3:-}"
-  [[ -z "$py_cmd2" ]] && command -v python3 >/dev/null 2>&1 && python3 --version >/dev/null 2>&1 && py_cmd2="python3"
-  [[ -z "$py_cmd2" ]] && command -v python  >/dev/null 2>&1 && python  --version >/dev/null 2>&1 && py_cmd2="python"
-  if [[ -n "$py_cmd2" ]]; then
-    local ext_items
-    ext_items=$($py_cmd2 - "$extnet_json" "Name" "ID" <<'PYEOF2'
-import sys, json
-data = json.loads(sys.argv[1])
-keys = sys.argv[2:]
-for item in data:
-    row = []
-    for k in keys:
-        for dk in item:
-            if dk.lower() == k.lower():
-                row.append(str(item[dk]))
-                break
-        else:
-            row.append("-")
-    print("\t".join(row))
-PYEOF2
-    ) || ext_items=""
-    if [[ -n "$ext_items" ]]; then
-      local ei=1
-      while IFS= read -r line; do
-        ext_lines+=("$line")
-        printf "    %d) %s\n" "$ei" "$(echo "$line" | tr '\t' ' | ')"
-        (( ei++ )) || true
-      done <<< "$ext_items"
-    fi
-  fi
-  printf "  Select [0-%d]: " "${#ext_lines[@]}"
-  read -r ext_choice || ext_choice="0"
-  if [[ "$ext_choice" == "0" ]] || ! [[ "$ext_choice" =~ ^[0-9]+$ ]]; then
-    env_out+="FLOATING_NETWORK=\"\"\n"
-    echo "  Floating network: skipped"
+  echo ""
+  echo "  Available floating networks:"
+  _print_ref_table "$extnet_json" "Name" "ID"
+  echo ""
+  if [[ -n "$cur_float_net" ]]; then
+    printf "  Enter floating network name or ID, or 'skip' (Enter to keep: %s): " "$cur_float_net"
   else
-    local eidx=$(( ext_choice - 1 ))
-    if [[ $eidx -ge 0 ]] && [[ $eidx -lt ${#ext_lines[@]} ]]; then
-      local ext_name
-      ext_name=$(echo "${ext_lines[$eidx]}" | cut -f1)
-      env_out+="FLOATING_NETWORK=\"${ext_name}\"\n"
-      echo "  Selected floating network: ${ext_name}"
-    else
-      env_out+="FLOATING_NETWORK=\"\"\n"
-      echo "  Floating network: skipped"
-    fi
+    printf "  Enter floating network name or ID (or press Enter to skip): "
   fi
+  local ext_input; read -r ext_input || ext_input=""
+
+  local float_net="$cur_float_net" float_net_id="$cur_float_net_id"
+  if [[ "$ext_input" == "skip" || "$ext_input" == "0" ]]; then
+    float_net=""; float_net_id=""
+    echo "  Floating network: skipped"
+  elif [[ -n "$ext_input" ]]; then
+    local feid fename
+    feid=$(_json_lookup "$extnet_json" "$ext_input" "Name" "ID")
+    fename=$(_json_lookup "$extnet_json" "$ext_input" "Name" "Name")
+    if [[ -z "$feid" ]]; then
+      feid=$(_json_lookup "$extnet_json" "$ext_input" "ID" "ID")
+      fename=$(_json_lookup "$extnet_json" "$ext_input" "ID" "Name")
+    fi
+    if [[ -n "$feid" ]]; then
+      float_net="${fename:-$ext_input}"; float_net_id="$feid"
+      echo "  Selected floating network: ${float_net} (${float_net_id})"
+    else
+      echo "  Warning: '${ext_input}' not found in list — saving as-is"
+      float_net="$ext_input"; float_net_id="$ext_input"
+    fi
+  else
+    [[ -n "$cur_float_net" ]] && echo "  (kept: ${cur_float_net})" || echo "  Floating network: skipped"
+  fi
+  env_out+="FLOATING_NETWORK=\"${float_net}\"\n"
+  env_out+="FLOATING_NETWORK_ID=\"${float_net_id}\"\n"
 
   # Write settings/openstack.env
   util_ensure_dir "${SETTINGS_DIR}"
@@ -602,9 +769,10 @@ _settings_show() {
 
   # OpenStack Resources section
   echo "  [ OpenStack Resources ]"
-  local proj_val net_val flavor_val voltype_val sg_val float_val
+  local proj_val net_val flavor_val voltype_val sg_val float_val key_val
   proj_val="(not set)"; net_val="(not set)"; flavor_val="(not set)"
   voltype_val="(not set)"; sg_val="(not set)"; float_val="(not configured)"
+  key_val="(not set)"
   if [[ -f "$OPENSTACK_ENV" ]]; then
     # shellcheck disable=SC1090
     source "$OPENSTACK_ENV" 2>/dev/null || true
@@ -613,6 +781,7 @@ _settings_show() {
     [[ -n "${FLAVOR_NAME:-}" ]]      && flavor_val="$FLAVOR_NAME"
     [[ -n "${VOLUME_TYPE:-}" ]]      && voltype_val="$VOLUME_TYPE"
     [[ -n "${SECURITY_GROUP:-}" ]]   && sg_val="$SECURITY_GROUP"
+    [[ -n "${KEY_NAME:-}" ]]         && key_val="$KEY_NAME"
     if [[ "${FLOATING_NETWORK+x}" ]]; then
       [[ -n "${FLOATING_NETWORK:-}" ]] && float_val="$FLOATING_NETWORK" || float_val="(not configured)"
     fi
@@ -622,6 +791,7 @@ _settings_show() {
   printf "  %-16s: %s\n" "Flavor"         "$flavor_val"
   printf "  %-16s: %s\n" "Volume Type"    "$voltype_val"
   printf "  %-16s: %s\n" "Security Group" "$sg_val"
+  printf "  %-16s: %s\n" "SSH Keypair"    "$key_val"
   printf "  %-16s: %s\n" "Floating Net"   "$float_val"
   echo ""
 
