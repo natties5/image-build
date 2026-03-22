@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # lib/openstack_api.sh — OpenStack CLI wrappers for all pipeline phases.
 # Source after core_paths.sh and common_utils.sh.
-# TODO: implement all functions — see /rebuild-project-doc/06_OPENSTACK_PIPELINE_DESIGN.md
 set -Eeuo pipefail
 
 # ─── Return code constants ─────────────────────────────────────────────────────
@@ -12,6 +11,29 @@ set -Eeuo pipefail
 # 6  resource already exists/conflict
 # 7  timeout
 # 8  bad status / state transition failure
+
+# ─── Central openstack wrapper ────────────────────────────────────────────────
+# Always call openstack through this function — never call openstack directly.
+# Automatically prepends --insecure when OS_INSECURE=true or OPENSTACK_INSECURE=true.
+openstack_cmd() {
+  local args=()
+  # Method A: OS_INSECURE env var (set in openrc or session)
+  # Method B: OPENSTACK_INSECURE env var
+  if [[ "${OS_INSECURE:-}" == "true" ]] || \
+     [[ "${OPENSTACK_INSECURE:-}" == "true" ]]; then
+    args+=("--insecure")
+  fi
+  openstack "${args[@]}" "$@"
+}
+
+# ─── Convenience wrappers (used by all phases) ────────────────────────────────
+os_token_issue()      { openstack_cmd token issue "$@"; }
+os_project_list()     { openstack_cmd project list -f json "$@"; }
+os_network_list()     { openstack_cmd network list -f json "$@"; }
+os_flavor_list()      { openstack_cmd flavor list -f json "$@"; }
+os_volume_type_list() { openstack_cmd volume type list -f json "$@"; }
+os_secgroup_list()    { openstack_cmd security group list -f json "$@"; }
+os_router_list()      { openstack_cmd router list -f json "$@"; }
 
 # ─── Auth / environment ───────────────────────────────────────────────────────
 

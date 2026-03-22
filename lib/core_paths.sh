@@ -19,6 +19,7 @@ export IMAGES_DIR="${WORKSPACE_DIR}/images"
 export RUNTIME_DIR="${ROOT_DIR}/runtime"
 export STATE_DIR="${RUNTIME_DIR}/state"
 export LOG_DIR="${RUNTIME_DIR}/logs"
+export SESSION_DIR="${RUNTIME_DIR}/session"
 
 # ─── Phase state subdirectories ───────────────────────────────────────────────
 export STATE_SYNC_DIR="${STATE_DIR}/sync"
@@ -80,7 +81,8 @@ core_ensure_runtime_dirs() {
     "${LOG_SYNC_DIR}" "${LOG_IMPORT_DIR}" "${LOG_CREATE_DIR}" \
     "${LOG_CONFIGURE_DIR}" "${LOG_CLEAN_DIR}" "${LOG_PUBLISH_DIR}" \
     "${IMAGES_DIR}/ubuntu" "${IMAGES_DIR}/debian" "${IMAGES_DIR}/rocky" \
-    "${IMAGES_DIR}/almalinux" "${IMAGES_DIR}/fedora"; do
+    "${IMAGES_DIR}/almalinux" "${IMAGES_DIR}/fedora" \
+    "${SESSION_DIR}"; do
     [[ -d "$d" ]] || mkdir -p "$d"
   done
 }
