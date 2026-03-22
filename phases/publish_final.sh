@@ -8,6 +8,7 @@ source "${SCRIPT_DIR}/../lib/core_paths.sh"
 source "${LIB_DIR}/common_utils.sh"
 source "${LIB_DIR}/openstack_api.sh"
 source "${LIB_DIR}/state_store.sh"
+source "${LIB_DIR}/config_store.sh"
 
 PHASE="publish"
 
@@ -198,5 +199,13 @@ EOF
 )"
 state_write_runtime_json "$PHASE" "$OS_FAMILY" "$VERSION" "$STATE_JSON"
 state_mark_ready "$PHASE" "$OS_FAMILY" "$VERSION"
+
+# Auto-promote guest config if this version is newer than default
+if declare -f _auto_promote_guest_config > /dev/null 2>&1; then
+  _auto_promote_guest_config \
+    "${GUEST_OS_FAMILY:-${OS_FAMILY}}" \
+    "${GUEST_OS_NAME:-${OS_FAMILY}}" \
+    "${VERSION}"
+fi
 
 util_log_info "=== publish_final DONE: $OS_FAMILY $VERSION — image=$FINAL_IMAGE_ID ($FINAL_IMAGE_NAME) ==="

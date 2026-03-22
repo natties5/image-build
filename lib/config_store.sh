@@ -62,3 +62,89 @@ config_write_effective_json() {
   util_log_info "NOT IMPLEMENTED: config_write_effective_json $*"
   return 0
 }
+
+# Auto-promote <version>.env to default.env after successful pipeline.
+# Rules:
+#   1. publish.ready must exist (pipeline passed completely)
+#   2. version must be >= current default version (no downgrade)
+#   3. default.env must already exist
+# Usage: _auto_promote_guest_config <os_family> <os_name> <version>
+# Example: _auto_promote_guest_config debian ubuntu 24.04
+_auto_promote_guest_config() {
+  local os_family="$1"
+  local os_name="$2"
+  local version="$3"
+
+  local version_env="${GUEST_CONFIG_DIR}/${os_name}/${version}.env"
+  local default_env="${GUEST_CONFIG_DIR}/${os_name}/default.env"
+  local publish_ready="${STATE_DIR}/publish/${os_name}-${version}.ready"
+
+  util_log_info "auto-promote check: os=${os_name} version=${version}"
+
+  # Rule 1: publish.ready must exist
+  if [[ ! -f "$publish_ready" ]]; then
+    util_log_info "  promote skipped: publish.ready not found for ${os_name}-${version}"
+    return 0
+  fi
+
+  # Rule 2: version.env must exist
+  if [[ ! -f "$version_env" ]]; then
+    util_log_warn "  promote skipped: version config not found: $version_env"
+    return 0
+  fi
+
+  # Rule 3: default.env must exist
+  if [[ ! -f "$default_env" ]]; then
+    util_log_warn "  promote skipped: default.env not found: $default_env"
+    return 0
+  fi
+
+  # Rule 4: compare version vs current default version
+  # Read current default version from GUEST_OS_VERSION field
+  local current_default_ver=""
+  current_default_ver=$(grep -m1 '^GUEST_OS_VERSION=' "$default_env" 2>/dev/null \
+    | cut -d= -f2 | tr -d '"' | tr -d "'" | tr -d ' ') || true
+
+  if [[ -z "$current_default_ver" ]]; then
+    util_log_warn "  promote skipped: cannot read GUEST_OS_VERSION from $default_env"
+    return 0
+  fi
+
+  # Compare using sort -V (version sort)
+  local newer
+  newer=$(printf '%s\n%s\n' "$current_default_ver" "$version" \
+    | sort -V | tail -1)
+
+  if [[ "$newer" == "$current_default_ver" && "$version" != "$current_default_ver" ]]; then
+    # current default is newer → do not promote
+    util_log_info "  promote skipped: ${version} < default ${current_default_ver} (no downgrade)"
+    return 0
+  fi
+
+  # All rules passed → promote
+  util_log_info "  promoting: ${os_name} ${version} → default.env"
+  util_log_info "  (replacing default version: ${current_default_ver} → ${version})"
+
+  cp "$version_env" "$default_env"
+
+  # Git commit the promotion
+  local repo_root
+  repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  cd "$repo_root"
+
+  if git diff --quiet "$default_env" 2>/dev/null; then
+    util_log_info "  promote: default.env unchanged (same content) — no commit needed"
+  else
+    git add "$default_env"
+    git commit -m "auto-promote: ${os_name} ${version} → default.env
+
+Pipeline passed completely (publish.ready exists).
+Previous default version: ${current_default_ver}
+New default version: ${version}
+Promoted by: _auto_promote_guest_config" \
+      --no-verify 2>/dev/null || true
+    util_log_info "  promote committed: ${os_name} ${version} → default.env"
+  fi
+
+  return 0
+}
