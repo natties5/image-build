@@ -115,6 +115,25 @@ APT_SOURCE_MODE="auto"
 DNF_REPO_MODE="auto"
 
 # =========================
+# Vault Fallback Config (new)
+# =========================
+# Enable vault fallback when OLS fails or official degrades
+GUEST_ENABLE_VAULT_FALLBACK=1
+
+# Vault URL for this OS
+# Ubuntu:    https://old-releases.ubuntu.com/ubuntu
+# Debian:    https://archive.debian.org/debian
+# Rocky:     https://dl.rockylinux.org/vault/rocky
+# AlmaLinux: https://repo.almalinux.org/vault
+# Fedora:    https://archives.fedoraproject.org/pub/archive/fedora/linux
+GUEST_VAULT_URL=""
+
+# Validation command after vault injection
+# apt family:  apt-get clean && apt-get update
+# dnf family:  dnf clean all && dnf -y makecache
+GUEST_VAULT_VALIDATION_COMMAND=""
+
+# =========================
 # Update / Reboot Policy
 # =========================
 RUN_UPDATE="yes"
@@ -298,6 +317,14 @@ runtime/state/configure/<os>-<version>.json
     "TIMEZONE": "Asia/Bangkok"
   },
   "repo_mode_used": "ols",
+  "repo_mode_reason": "ols_ok",
+  "official_degraded": false,
+  "ols_attempted": true,
+  "ols_reachable": true,
+  "vault_attempted": false,
+  "vault_reachable": null,
+  "failure_phase": "",
+  "failure_reason": "",
   "phase_status": {
     "resolve_config": "ok",
     "guest_preflight": "ok",
