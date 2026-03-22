@@ -145,9 +145,11 @@ if [[ "${GUEST_FSTRIM_BEFORE_SHUTDOWN:-0}" == "1" ]]; then
 fi
 
 # --- Final shutdown -----------------------------------------------------------
-util_log_info "Sending shutdown to guest..."
-_gssh "shutdown -h now || true" 2>/dev/null || true
-util_log_info "  Poweroff command sent"
+# Poweroff via OpenStack API (not SSH)
+# Reason: SSH host keys are removed before this point,
+# so SSH-based shutdown is unreliable.
+util_log_info "powering off server via OpenStack API: $SERVER_ID"
+openstack_cmd server stop "$SERVER_ID" 2>&1 || true
 
 # --- Wait for SHUTOFF ---------------------------------------------------------
 util_log_info "Waiting for server $SERVER_ID to become SHUTOFF (timeout 300s)..."
