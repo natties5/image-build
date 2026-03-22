@@ -165,6 +165,11 @@ _settings_load_openrc() {
     cat /tmp/openrc_source_err
     return 1
   fi
+  # On Windows/Git Bash: OS_CACERT Linux paths don't exist — unset to use Python certifi
+  if [[ -n "${OS_CACERT:-}" && ! -f "${OS_CACERT}" ]]; then
+    echo "  Note: OS_CACERT path not found (${OS_CACERT}) — using default CA bundle"
+    unset OS_CACERT
+  fi
 
   # Step C: detect --insecure need (two methods)
   local insecure_detected=""
