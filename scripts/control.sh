@@ -1580,42 +1580,310 @@ menu_resume() {
 
 # ─── Status menu ──────────────────────────────────────────────────────────────
 menu_status() {
-  echo ""
-  echo "--- Status ---"
-  echo "  1) Dashboard"
-  echo "  2) Show Sync State"
-  echo "  3) Back"
-  echo -n "  Select [1-3]: "
-  local choice; read -r choice || return
-  case "$choice" in
-    1) cmd_status_dashboard ;;
-    2) cmd_status_sync ;;
-    3) return ;;
-    *) echo "Invalid choice." ;;
-  esac
-}
-
-cmd_status_dashboard() {
-  echo ""
-  echo "=== Pipeline Status Dashboard ==="
-  echo "Sync state files:"
-  ls -1 "${STATE_SYNC_DIR}/" 2>/dev/null | sort || echo "  (none)"
-  echo ""
-  echo "Recent logs:"
-  ls -1t "${LOG_SYNC_DIR}/" 2>/dev/null | head -5 || echo "  (none)"
-  echo ""
-}
-
-cmd_status_sync() {
-  echo ""
-  echo "=== Sync State ==="
-  local f
-  for f in "${STATE_SYNC_DIR}"/*.json; do
-    [[ -f "$f" ]] || continue
-    echo "--- $(basename "$f") ---"
-    cat "$f"
+  while true; do
     echo ""
+    echo "--- Status ---"
+    echo "  1) Dashboard"
+    echo "  2) Show Build State"
+    echo "  3) Show Logs"
+    echo "  4) Back"
+    echo -n "  Select [1-4]: "
+    local choice; read -r choice || return
+    case "$choice" in
+      1) _status_dashboard ;;
+      2) _status_build_state ;;
+      3) _status_show_logs ;;
+      4) return ;;
+      *) echo "  Invalid choice." ;;
+    esac
   done
+}
+
+_status_dashboard() {
+  local os_list="ubuntu debian fedora almalinux rocky"
+  local phases="import create configure clean publish"
+
+  echo ""
+  echo "  ╔══════════════════════════════════════════════════════════════╗"
+  echo "  ║                  Pipeline Status Dashboard                   ║"
+  echo "  ╚══════════════════════════════════════════════════════════════╝"
+  echo ""
+
+  # Print header
+  printf "  %-12s %-8s " "OS" "VERSION"
+  for phase in $phases; do
+    printf "%-11s" "$phase"
+  done
+  echo ""
+  printf "  %-12s %-8s " "──────────" "───────"
+  for phase in $phases; do
+    printf "%-11s" "──────────"
+  done
+  echo ""
+
+  # For each OS, find all versions with any state
+  local os ver found_any=false
+  for os in $os_list; do
+    # Collect all versions for this OS from all phase state dirs
+    local -a versions=()
+    local f base v
+    for phase in $phases; do
+      for f in "${STATE_DIR}/${phase}/${os}"-*.json \
+               "${STATE_DIR}/${phase}/${os}"-*.ready \
+               "${STATE_DIR}/${phase}/${os}"-*.failed; do
+        [[ -f "$f" ]] || continue
+        base="$(basename "$f")"
+        # Extract version: remove os- prefix and extension
+        v="${base#${os}-}"
+        v="${v%%.*}"
+        [[ -n "$v" ]] && versions+=("$v")
+      done
+    done
+
+    # Also check sync state for known versions
+    for f in "${STATE_SYNC_DIR}/${os}"-*.json; do
+      [[ -f "$f" ]] || continue
+      base="$(basename "$f" .json)"
+      v="${base#${os}-}"
+      [[ -n "$v" ]] && versions+=("$v")
+    done
+
+    # Deduplicate and sort
+    local -a unique_vers=()
+    local seen_ver
+    while IFS= read -r seen_ver; do
+      unique_vers+=("$seen_ver")
+    done < <(printf '%s\n' "${versions[@]}" | sort -uV)
+
+    if [[ ${#unique_vers[@]} -eq 0 ]]; then
+      printf "  %-12s %-8s " "$os" "-"
+      for phase in $phases; do
+        printf "%-11s" "○"
+      done
+      echo ""
+      found_any=true
+      continue
+    fi
+
+    for ver in "${unique_vers[@]}"; do
+      printf "  %-12s %-8s " "$os" "$ver"
+      for phase in $phases; do
+        local ready_f="${STATE_DIR}/${phase}/${os}-${ver}.ready"
+        local failed_f="${STATE_DIR}/${phase}/${os}-${ver}.failed"
+        local icon
+        if [[ -f "$ready_f" ]]; then
+          icon="✓"
+        elif [[ -f "$failed_f" ]]; then
+          icon="✗ FAIL"
+        else
+          icon="○"
+        fi
+        printf "%-11s" "$icon"
+      done
+      echo ""
+      found_any=true
+    done
+  done
+
+  if [[ "$found_any" == "false" ]]; then
+    echo "  (no pipeline state found — run Build first)"
+  fi
+
+  echo ""
+  echo "  Legend: ✓ = ready   ✗ = failed   ○ = not started"
+  echo ""
+}
+
+_status_build_state() {
+  local os ver
+  os=$(_build_select_os 2>/dev/null) || {
+    echo "  No OS with state found."
+    return
+  }
+  ver=$(_build_select_version "$os" 2>/dev/null) || {
+    # Fall back to simple version list from state files
+    local -a state_vers=()
+    local f base v
+    for f in "${STATE_DIR}"/import/"${os}"-*.json \
+             "${STATE_DIR}"/create/"${os}"-*.json \
+             "${STATE_DIR}"/configure/"${os}"-*.json; do
+      [[ -f "$f" ]] || continue
+      base="$(basename "$f" .json)"
+      v="${base#${os}-}"
+      [[ -n "$v" ]] && state_vers+=("$v")
+    done
+    local -a uv=()
+    while IFS= read -r v; do uv+=("$v"); done \
+      < <(printf '%s\n' "${state_vers[@]}" | sort -uV)
+    if [[ ${#uv[@]} -eq 0 ]]; then
+      echo "  No build state found for $os."
+      return
+    fi
+    echo "  Select version for $os:" >&2
+    local i=1
+    for v in "${uv[@]}"; do
+      printf "    %d) %s\n" "$i" "$v" >&2
+      (( i++ )) || true
+    done
+    echo -n "  Select [1-${#uv[@]}]: " >&2
+    local c; read -r c || return
+    [[ "$c" =~ ^[0-9]+$ ]] || return
+    local idx=$(( c - 1 ))
+    ver="${uv[$idx]:-}"
+  }
+  [[ -n "$ver" ]] || return
+
+  echo ""
+  echo "  === Build State: $os $ver ==="
+  echo ""
+
+  local phases="import create configure clean publish"
+  local phase
+  for phase in $phases; do
+    local ready_f="${STATE_DIR}/${phase}/${os}-${ver}.ready"
+    local failed_f="${STATE_DIR}/${phase}/${os}-${ver}.failed"
+    local json_f="${STATE_DIR}/${phase}/${os}-${ver}.json"
+    local status_icon="○ not started"
+    [[ -f "$ready_f" ]]  && status_icon="✓ ready"
+    [[ -f "$failed_f" ]] && status_icon="✗ FAILED"
+
+    printf "  %-12s: %s\n" "$phase" "$status_icon"
+
+    # Show key fields from JSON if exists
+    if [[ -f "$json_f" ]]; then
+      local img_name img_id vm ip repo_mode failure final_name final_id
+      case "$phase" in
+        import)
+          img_name=$(grep -o '"base_image_name"[^,}]*' "$json_f" 2>/dev/null \
+            | cut -d'"' -f4 | head -1) || true
+          img_id=$(grep -o '"base_image_id"[^,}]*' "$json_f" 2>/dev/null \
+            | cut -d'"' -f4 | head -1) || true
+          [[ -n "$img_name" ]] && printf "    %-14s: %s\n" "image_name" "$img_name"
+          [[ -n "$img_id" ]]   && printf "    %-14s: %s\n" "image_id" "$img_id"
+          ;;
+        create)
+          vm=$(grep -o '"vm_name"[^,}]*' "$json_f" 2>/dev/null \
+            | cut -d'"' -f4 | head -1) || true
+          ip=$(grep -o '"guest_ip"[^,}]*' "$json_f" 2>/dev/null \
+            | cut -d'"' -f4 | head -1) || true
+          [[ -n "$vm" ]] && printf "    %-14s: %s\n" "vm_name" "$vm"
+          [[ -n "$ip" ]] && printf "    %-14s: %s\n" "guest_ip" "$ip"
+          ;;
+        configure)
+          repo_mode=$(grep -o '"repo_mode_used"[^,}]*' "$json_f" 2>/dev/null \
+            | cut -d'"' -f4 | head -1) || true
+          failure=$(grep -o '"failure_reason"[^,}]*' "$json_f" 2>/dev/null \
+            | cut -d'"' -f4 | head -1) || true
+          [[ -n "$repo_mode" ]] && printf "    %-14s: %s\n" "repo_mode" "$repo_mode"
+          [[ -n "$failure" && "$failure" != "" ]] && \
+            printf "    %-14s: %s\n" "failure" "$failure"
+          ;;
+        publish)
+          final_name=$(grep -o '"final_image_name"[^,}]*' "$json_f" 2>/dev/null \
+            | cut -d'"' -f4 | head -1) || true
+          final_id=$(grep -o '"final_image_id"[^,}]*' "$json_f" 2>/dev/null \
+            | cut -d'"' -f4 | head -1) || true
+          [[ -n "$final_name" ]] && printf "    %-14s: %s\n" "final_image" "$final_name"
+          [[ -n "$final_id" ]]   && printf "    %-14s: %s\n" "image_id" "$final_id"
+          ;;
+      esac
+    fi
+  done
+  echo ""
+}
+
+_status_show_logs() {
+  # Select OS
+  local os
+  os=$(_build_select_os 2>/dev/null) || {
+    echo "  No OS state found."
+    return
+  }
+
+  # Select version from log files
+  local -a log_vers=()
+  local f base v
+  for f in "${LOG_DIR}"/*/"${os}"-*.log; do
+    [[ -f "$f" ]] || continue
+    base="$(basename "$f" .log)"
+    v="${base#${os}-}"
+    [[ -n "$v" ]] && log_vers+=("$v")
+  done
+  local -a uv=()
+  while IFS= read -r v; do uv+=("$v"); done \
+    < <(printf '%s\n' "${log_vers[@]}" | sort -uV)
+
+  if [[ ${#uv[@]} -eq 0 ]]; then
+    echo "  No logs found for $os."
+    return
+  fi
+
+  echo "  Select version for $os:" >&2
+  local i=1
+  for v in "${uv[@]}"; do
+    printf "    %d) %s\n" "$i" "$v" >&2
+    (( i++ )) || true
+  done
+  echo -n "  Select [1-${#uv[@]}]: " >&2
+  local c; read -r c || return
+  [[ "$c" =~ ^[0-9]+$ ]] || return
+  local idx=$(( c - 1 ))
+  local ver="${uv[$idx]:-}"
+  [[ -n "$ver" ]] || return
+
+  # Select phase
+  echo ""
+  echo "  Select phase:"
+  local phases="import create configure clean publish"
+  local phase_arr=($phases)
+  local pi=1
+  for phase in $phases; do
+    local lf="${LOG_DIR}/${phase}/${os}-${ver}.log"
+    local exists="(no log)"
+    [[ -f "$lf" ]] && exists="$(wc -l < "$lf") lines"
+    printf "    %d) %-15s %s\n" "$pi" "$phase" "$exists"
+    (( pi++ )) || true
+  done
+  printf "    %d) all phases\n" "$pi"
+  echo -n "  Select [1-$pi]: " >&2
+  local pc; read -r pc || return
+  [[ "$pc" =~ ^[0-9]+$ ]] || return
+
+  # Show log
+  echo ""
+  if [[ "$pc" -eq "$pi" ]]; then
+    # All phases
+    for phase in $phases; do
+      local lf="${LOG_DIR}/${phase}/${os}-${ver}.log"
+      if [[ -f "$lf" ]]; then
+        echo "  ━━━ $phase ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        tail -30 "$lf"
+        echo ""
+      fi
+    done
+  else
+    local pidx=$(( pc - 1 ))
+    local sel_phase="${phase_arr[$pidx]:-}"
+    [[ -n "$sel_phase" ]] || return
+    local lf="${LOG_DIR}/${sel_phase}/${os}-${ver}.log"
+    if [[ -f "$lf" ]]; then
+      echo "  ━━━ $sel_phase log: $os $ver ━━━━━━━━━━━━━━━━━━━━"
+      echo ""
+      # Ask: tail or full
+      echo "  Show: [1] last 50 lines  [2] full log"
+      echo -n "  Select [1-2]: "
+      local lc; read -r lc || lc="1"
+      echo ""
+      if [[ "$lc" == "2" ]]; then
+        cat "$lf"
+      else
+        tail -50 "$lf"
+      fi
+    else
+      echo "  No log found: $lf"
+    fi
+  fi
+  echo ""
 }
 
 # ─── Cleanup menu (skeleton) ──────────────────────────────────────────────────
@@ -1682,13 +1950,10 @@ dispatch_command() {
     status)
       local subcmd="${1:-}"; shift || true
       case "$subcmd" in
-        dashboard) cmd_status_dashboard ;;
-        sync)      cmd_status_sync ;;
-        logs)
-          util_log_info "TODO: status logs"
-          echo "  [TODO] logs viewer not yet implemented."
-          ;;
-        *) util_die "Unknown status subcommand: ${subcmd}" ;;
+        dashboard) _status_dashboard ;;
+        build-state) _status_build_state ;;
+        logs)      _status_show_logs ;;
+        *) util_die "Unknown status subcommand: ${subcmd}. Try: dashboard | build-state | logs" ;;
       esac
       ;;
     cleanup)
