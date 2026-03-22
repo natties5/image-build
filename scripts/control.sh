@@ -215,31 +215,36 @@ _settings_load_openrc() {
     selected_openrc="${files[0]}"
     echo "  Auto-selected: $(basename "$selected_openrc")"
   else
-    # Try environment-based auto-selection first (stderr → terminal for status msg)
-    local auto_path
+    # Find suggested default via environment detection (shown as hint, not forced)
+    local auto_path default_idx=0
     auto_path=$(_auto_select_openrc "$openrc_dir") || true
 
-    if [[ -n "$auto_path" && -f "$auto_path" ]]; then
-      selected_openrc="$auto_path"
-      echo "  Auto-selected: $(basename "$selected_openrc") [environment=$(uname -s)]"
+    echo "  Select OpenRC profile:"
+    local i=1
+    for f in "${files[@]}"; do
+      local hint=""
+      [[ -n "$auto_path" && "$f" == "$auto_path" ]] && hint=" (suggested)"
+      printf "    %d) %s%s\n" "$i" "$(basename "$f")" "$hint"
+      [[ -n "$auto_path" && "$f" == "$auto_path" ]] && default_idx=$i
+      (( i++ )) || true
+    done
+    if [[ "$default_idx" -gt 0 ]]; then
+      echo -n "  Select [1-${#files[@]}] (Enter = ${default_idx}): "
     else
-      echo "  Select OpenRC profile:"
-      local i=1
-      for f in "${files[@]}"; do
-        printf "    %d) %s\n" "$i" "$(basename "$f")"
-        (( i++ )) || true
-      done
       echo -n "  Select [1-${#files[@]}]: "
-      local choice; read -r choice || return 1
-      if ! [[ "$choice" =~ ^[0-9]+$ ]]; then
-        echo "  Invalid selection."; return 1
-      fi
-      local idx=$(( choice - 1 ))
-      if [[ $idx -lt 0 ]] || [[ $idx -ge ${#files[@]} ]]; then
-        echo "  Invalid selection."; return 1
-      fi
-      selected_openrc="${files[$idx]}"
     fi
+    local choice; read -r choice || return 1
+    if [[ -z "$choice" ]] && [[ "$default_idx" -gt 0 ]]; then
+      choice="$default_idx"
+    fi
+    if ! [[ "$choice" =~ ^[0-9]+$ ]]; then
+      echo "  Invalid selection."; return 1
+    fi
+    local idx=$(( choice - 1 ))
+    if [[ $idx -lt 0 ]] || [[ $idx -ge ${#files[@]} ]]; then
+      echo "  Invalid selection."; return 1
+    fi
+    selected_openrc="${files[$idx]}"
   fi
 
   # Step B: source the selected file
