@@ -128,15 +128,17 @@ menu_settings() {
     echo "--- Settings ---"
     echo "  1) Load OpenRC & Validate Auth"
     echo "  2) Select Resources"
-    echo "  3) Show Current Settings"
-    echo "  4) Back"
-    echo -n "  Select [1-4]: "
+    echo "  3) Edit Guest Access"
+    echo "  4) Show Current Settings"
+    echo "  5) Back"
+    echo -n "  Select [1-5]: "
     local choice; read -r choice || return
     case "$choice" in
       1) _settings_load_openrc ;;
       2) _settings_select_resources ;;
-      3) _settings_show ;;
-      4) return ;;
+      3) _settings_edit_guest_access ;;
+      4) _settings_show ;;
+      5) return ;;
       *) echo "  Invalid choice." ;;
     esac
   done
@@ -786,7 +788,221 @@ PYEOF_SG
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
-# OPTION 3 — Show Current Settings (read-only summary)
+# OPTION 3 — Edit Guest Access
+# ──────────────────────────────────────────────────────────────────────────────
+_settings_edit_guest_access() {
+  local guest_env="${GUEST_ACCESS_ENV}"
+  local guest_keys_dir="${SETTINGS_DIR}/guest-keys"
+
+  # Load current values
+  local cur_mode="" cur_user="" cur_port="" cur_password=""
+  local cur_private_key="" cur_auth_key=""
+  local cur_enable_root="yes" cur_permit_root="yes"
+  local cur_pass_auth="yes" cur_pubkey_auth="yes"
+  if [[ -f "$guest_env" ]]; then
+    # shellcheck disable=SC1090
+    source "$guest_env" 2>/dev/null || true
+    cur_mode="${SSH_AUTH_MODE:-}"
+    cur_user="${SSH_USER:-}"
+    cur_port="${SSH_PORT:-}"
+    cur_password="${ROOT_PASSWORD:-}"
+    cur_private_key="${SSH_PRIVATE_KEY:-}"
+    cur_auth_key="${ROOT_AUTHORIZED_KEY:-}"
+    cur_enable_root="${ENABLE_ROOT_SSH:-yes}"
+    cur_permit_root="${SSH_PERMIT_ROOT_LOGIN:-yes}"
+    cur_pass_auth="${SSH_PASSWORD_AUTH:-yes}"
+    cur_pubkey_auth="${SSH_PUBKEY_AUTH:-yes}"
+  fi
+
+  echo ""
+  echo "  Current Guest Access Settings:"
+  printf "  %-20s: %s\n" "SSH_AUTH_MODE"  "${cur_mode:-(not set)}"
+  printf "  %-20s: %s\n" "SSH_USER"       "${cur_user:-(not set)}"
+  printf "  %-20s: %s\n" "SSH_PORT"       "${cur_port:-(not set)}"
+  local pw_display="(not set)"
+  [[ -n "${cur_password:-}" ]] && pw_display="***"
+  printf "  %-20s: %s\n" "ROOT_PASSWORD"  "$pw_display"
+  printf "  %-20s: %s\n" "SSH_PRIVATE_KEY" "${cur_private_key:-(not set)}"
+  echo ""
+  echo "  Press Enter to keep current value."
+  echo ""
+
+  # ── Field 1: Auth Mode ────────────────────────────────────────────────────
+  local new_mode="$cur_mode"
+  while true; do
+    printf "  Auth mode [password/key] (keep: %s): " "${cur_mode:-(not set)}"
+    local input; read -r input || input=""
+    if [[ -z "$input" ]]; then
+      new_mode="${cur_mode:-password}"
+      break
+    elif [[ "$input" == "password" || "$input" == "key" ]]; then
+      new_mode="$input"
+      break
+    else
+      echo "  Invalid — must be password or key"
+    fi
+  done
+
+  # ── Field 2: SSH User ─────────────────────────────────────────────────────
+  printf "  SSH user (keep: %s): " "${cur_user:-root}"
+  local u_input; read -r u_input || u_input=""
+  local new_user="${cur_user:-root}"
+  [[ -n "$u_input" ]] && new_user="$u_input"
+
+  # ── Field 3: SSH Port ─────────────────────────────────────────────────────
+  local new_port="${cur_port:-22}"
+  while true; do
+    printf "  SSH port (keep: %s): " "${cur_port:-22}"
+    local p_input; read -r p_input || p_input=""
+    if [[ -z "$p_input" ]]; then
+      break
+    elif [[ "$p_input" =~ ^[0-9]+$ ]] && (( p_input >= 1 && p_input <= 65535 )); then
+      new_port="$p_input"
+      break
+    else
+      echo "  Invalid — must be a number between 1 and 65535"
+    fi
+  done
+
+  # ── Field 4: Credential (password or key) ────────────────────────────────
+  local new_password="$cur_password"
+  local new_private_key="$cur_private_key"
+  if [[ "$new_mode" == "password" ]]; then
+    echo -n "  Root password (keep: ***): "
+    local pw_input; read -rs pw_input || pw_input=""
+    echo ""
+    [[ -n "$pw_input" ]] && new_password="$pw_input"
+  else
+    # Scan settings/guest-keys/ for key files
+    local keyfiles=()
+    local kf
+    for kf in "${guest_keys_dir}"/id_* "${guest_keys_dir}"/*.pem \
+               "${guest_keys_dir}"/*.rsa; do
+      [[ -f "$kf" ]] && keyfiles+=("$(basename "$kf")") || true
+    done
+
+    if [[ ${#keyfiles[@]} -eq 0 ]]; then
+      echo "  No key files found in settings/guest-keys/"
+      echo "  Place your private key there and try again."
+      echo "  SSH_PRIVATE_KEY left unchanged."
+    elif [[ ${#keyfiles[@]} -eq 1 ]]; then
+      echo "  Auto-selected key: ${keyfiles[0]}"
+      new_private_key="${guest_keys_dir}/${keyfiles[0]}"
+    else
+      echo "  Available keys in settings/guest-keys/:"
+      local i=1
+      for kf in "${keyfiles[@]}"; do
+        printf "    %d) %s\n" "$i" "$kf"
+        (( i++ )) || true
+      done
+      printf "  Select key (or press Enter to keep current): "
+      local kidx; read -r kidx || kidx=""
+      if [[ -n "$kidx" ]] && [[ "$kidx" =~ ^[0-9]+$ ]]; then
+        local sel=$(( kidx - 1 ))
+        if (( sel >= 0 && sel < ${#keyfiles[@]} )); then
+          new_private_key="${guest_keys_dir}/${keyfiles[$sel]}"
+        fi
+      fi
+    fi
+  fi
+
+  # ── Field 5: Root Authorized Key (optional) ───────────────────────────────
+  local new_auth_key="$cur_auth_key"
+  local ak_preview="(not set)"
+  if [[ -n "$cur_auth_key" ]]; then
+    ak_preview="${cur_auth_key:0:40}..."
+  fi
+  echo "  Root authorized key (public key to inject into guest):"
+  echo "  Current: ${ak_preview}"
+  echo -n "  Paste public key or press Enter to keep: "
+  local ak_input; read -r ak_input || ak_input=""
+  [[ -n "$ak_input" ]] && new_auth_key="$ak_input"
+
+  # ── Field 6: Root SSH Policy ──────────────────────────────────────────────
+  local new_enable_root="$cur_enable_root"
+  local new_permit_root="$cur_permit_root"
+  local new_pass_auth="$cur_pass_auth"
+  local new_pubkey_auth="$cur_pubkey_auth"
+
+  echo ""
+  echo "  Root SSH Policy (current values):"
+  printf "    %-26s: %s\n" "ENABLE_ROOT_SSH"       "${cur_enable_root:-yes}"
+  printf "    %-26s: %s\n" "SSH_PERMIT_ROOT_LOGIN" "${cur_permit_root:-yes}"
+  printf "    %-26s: %s\n" "SSH_PASSWORD_AUTH"     "${cur_pass_auth:-yes}"
+  printf "    %-26s: %s\n" "SSH_PUBKEY_AUTH"       "${cur_pubkey_auth:-yes}"
+  echo -n "  Change policy? [y/N]: "
+  local ch; read -r ch || ch=""
+  if [[ "${ch,,}" == "y" ]]; then
+    local pol_var pol_cur pol_val
+    for pol_var in ENABLE_ROOT_SSH SSH_PERMIT_ROOT_LOGIN SSH_PASSWORD_AUTH SSH_PUBKEY_AUTH; do
+      case "$pol_var" in
+        ENABLE_ROOT_SSH)       pol_cur="$new_enable_root" ;;
+        SSH_PERMIT_ROOT_LOGIN) pol_cur="$new_permit_root" ;;
+        SSH_PASSWORD_AUTH)     pol_cur="$new_pass_auth" ;;
+        SSH_PUBKEY_AUTH)       pol_cur="$new_pubkey_auth" ;;
+      esac
+      while true; do
+        printf "  %s [yes/no] (keep: %s): " "$pol_var" "${pol_cur:-yes}"
+        read -r pol_val || pol_val=""
+        if [[ -z "$pol_val" ]]; then
+          pol_val="$pol_cur"
+          break
+        elif [[ "$pol_val" == "yes" || "$pol_val" == "no" ]]; then
+          break
+        else
+          echo "  Invalid — must be yes or no"
+        fi
+      done
+      case "$pol_var" in
+        ENABLE_ROOT_SSH)       new_enable_root="$pol_val" ;;
+        SSH_PERMIT_ROOT_LOGIN) new_permit_root="$pol_val" ;;
+        SSH_PASSWORD_AUTH)     new_pass_auth="$pol_val" ;;
+        SSH_PUBKEY_AUTH)       new_pubkey_auth="$pol_val" ;;
+      esac
+    done
+  fi
+
+  # ── Save to settings/guest-access.env ────────────────────────────────────
+  util_ensure_dir "${SETTINGS_DIR}"
+  cat > "$guest_env" <<EOF
+# settings/guest-access.env — generated by control.sh
+# This file is gitignored — do not commit
+
+SSH_AUTH_MODE="${new_mode}"
+SSH_USER="${new_user}"
+SSH_PORT="${new_port}"
+SSH_CONNECT_TIMEOUT="60"
+ROOT_PASSWORD="${new_password}"
+SSH_PRIVATE_KEY="${new_private_key}"
+ROOT_AUTHORIZED_KEY="${new_auth_key}"
+ENABLE_ROOT_SSH="${new_enable_root}"
+SSH_PERMIT_ROOT_LOGIN="${new_permit_root}"
+SSH_PASSWORD_AUTH="${new_pass_auth}"
+SSH_PUBKEY_AUTH="${new_pubkey_auth}"
+EOF
+  echo ""
+  echo "  ✓ Guest access saved to settings/guest-access.env"
+
+  # ── Validate after save ───────────────────────────────────────────────────
+  local warn=""
+  if [[ "$new_mode" == "password" ]] && [[ -z "$new_password" ]]; then
+    warn="SSH_AUTH_MODE=password but ROOT_PASSWORD is empty"
+  elif [[ "$new_mode" == "key" ]] && [[ -z "$new_private_key" ]]; then
+    warn="SSH_AUTH_MODE=key but SSH_PRIVATE_KEY is empty"
+  elif [[ "$new_mode" == "key" ]] && [[ -n "$new_private_key" ]] && \
+       [[ ! -f "$new_private_key" ]]; then
+    warn="SSH_PRIVATE_KEY file not found: ${new_private_key}"
+  fi
+
+  if [[ -n "$warn" ]]; then
+    echo "  ⚠ Warning: ${warn}"
+  else
+    echo "  ✓ Validation OK"
+  fi
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# OPTION 4 — Show Current Settings (read-only summary)
 # ──────────────────────────────────────────────────────────────────────────────
 _settings_show() {
   # Guard: prevent recursive/duplicate calls (e.g. from sourced session files)
@@ -849,6 +1065,33 @@ _settings_show() {
   printf "  %-16s: %s\n" "Security Group" "$sg_val"
   printf "  %-16s: %s\n" "SSH Keypair"    "$key_val"
   printf "  %-16s: %s\n" "Floating Net"   "$float_val"
+  echo ""
+
+  # Guest Access section
+  echo "  [ Guest Access ]"
+  local ga_mode ga_user ga_port ga_key ga_pkey
+  ga_mode="(not set)"; ga_user="(not set)"; ga_port="(not set)"
+  ga_key="(not set)"; ga_pkey="(not set)"
+  if [[ -f "$GUEST_ACCESS_ENV" ]]; then
+    # shellcheck disable=SC1090
+    source "$GUEST_ACCESS_ENV" 2>/dev/null || true
+    [[ -n "${SSH_AUTH_MODE:-}" ]]   && ga_mode="$SSH_AUTH_MODE"
+    [[ -n "${SSH_USER:-}" ]]        && ga_user="$SSH_USER"
+    [[ -n "${SSH_PORT:-}" ]]        && ga_port="$SSH_PORT"
+    if [[ "${SSH_AUTH_MODE:-}" == "password" ]]; then
+      [[ -n "${ROOT_PASSWORD:-}" ]] && ga_key="***" || ga_key="(not set)"
+    else
+      ga_pkey="${SSH_PRIVATE_KEY:-(not set)}"
+    fi
+  fi
+  printf "  %-20s: %s\n" "Auth Mode"    "$ga_mode"
+  printf "  %-20s: %s\n" "SSH User"     "$ga_user"
+  printf "  %-20s: %s\n" "SSH Port"     "$ga_port"
+  if [[ "${ga_mode}" == "password" ]]; then
+    printf "  %-20s: %s\n" "Root Password" "$ga_key"
+  else
+    printf "  %-20s: %s\n" "Private Key"   "$ga_pkey"
+  fi
   echo ""
 
   # Files section

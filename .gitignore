@@ -23,6 +23,11 @@ deploy/local/**
 manifests/**/*.tsv
 manifests/**/*.json
 
+# ─── Guest keys (private keys — never commit) ────────────────────────────────
+settings/guest-keys/*.pem
+settings/guest-keys/*.rsa
+settings/guest-keys/id_*
+
 # ─── OS ───────────────────────────────────────────────────────────────────────
 .DS_Store
 
