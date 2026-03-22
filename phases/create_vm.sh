@@ -102,9 +102,38 @@ if ! os_wait_volume_status "$VOLUME_ID" "available" 600 10; then
   exit 1
 fi
 
+# ─── Generate cloud-init user_data ───────────────────────────────────────────
+# Ubuntu cloud images disable root/password by default — inject cloud-init to enable it
+USERDATA_FILE="$(mktemp /tmp/userdata-XXXXXX.yaml)"
+GUEST_PASSWORD_VAL="${GUEST_PASSWORD:-mis@Pass01}"
+cat > "$USERDATA_FILE" << CLOUD_INIT
+#cloud-config
+chpasswd:
+  list: |
+    root:${GUEST_PASSWORD_VAL}
+  expire: False
+password: ${GUEST_PASSWORD_VAL}
+ssh_pwauth: True
+disable_root: false
+runcmd:
+  - sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+  - sed -i 's/^#*PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
+  - systemctl restart sshd || service sshd restart || true
+CLOUD_INIT
+util_log_info "User data written to: $USERDATA_FILE"
+
 # ─── Create server from volume ────────────────────────────────────────────────
 util_log_info "Creating server: $VM_NAME ..."
-SERVER_ID="$(os_create_server_from_volume "$VM_NAME" "$FLAVOR" "$NETWORK" "$SECGROUP" "$VOLUME_ID")"
+SERVER_ID="$(openstack_cmd server create \
+  --flavor "$FLAVOR" \
+  --volume "$VOLUME_ID" \
+  --network "$NETWORK" \
+  --security-group "$SECGROUP" \
+  --user-data "$USERDATA_FILE" \
+  --property pipeline_stage=build \
+  "$VM_NAME" \
+  -f value -c id 2>/dev/null)"
+rm -f "$USERDATA_FILE"
 
 if [[ -z "$SERVER_ID" ]]; then
   util_log_error "Server create returned empty ID — checking if server was created anyway..."
