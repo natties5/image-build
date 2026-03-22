@@ -183,7 +183,6 @@ _auto_select_openrc() {
   done
 
   if [[ -n "$preferred" ]]; then
-    echo "  [auto-select] environment=$(uname -s) → $(basename "$preferred")" >&2
     printf '%s' "$preferred"
     return 0
   fi
