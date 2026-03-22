@@ -162,6 +162,105 @@ ssh_wait_ready() {
     ssh_run "$host" "$port" "$user" "$auth_mode" "$auth_value" "true"
 }
 
+# ─── Sync UI helpers ──────────────────────────────────────────────────────────
+# Returns space-separated list of supported OS names
+_sync_list_oses() {
+  echo "ubuntu debian fedora almalinux rocky"
+}
+
+# Print numbered OS list, read user choice, echo selected OS name to stdout.
+# Prompts and errors go to stderr so this works in command substitution.
+_sync_select_os() {
+  local oses
+  read -ra oses <<< "$(_sync_list_oses)"
+  echo "  Select OS:" >&2
+  local i=1 o
+  for o in "${oses[@]}"; do
+    printf "    %d) %s\n" "$i" "$o" >&2
+    (( i++ )) || true
+  done
+  printf "  Select [1-%d]: " "${#oses[@]}" >&2
+  local choice; read -r choice || return 1
+  if ! [[ "$choice" =~ ^[0-9]+$ ]]; then
+    echo "  Invalid selection." >&2; return 1
+  fi
+  local idx=$(( choice - 1 ))
+  if [[ $idx -lt 0 ]] || [[ $idx -ge ${#oses[@]} ]]; then
+    echo "  Invalid selection." >&2; return 1
+  fi
+  echo "${oses[$idx]}"
+}
+
+# Print "VERSION [STATUS]" lines for an OS, sorted descending by version.
+# Sources: runtime/state/sync/<os>-*.json + config/os/<os>/sync.env TRACKED_VERSIONS
+_sync_list_versions_for_os() {
+  local os="$1"
+  declare -A ver_status
+  local f
+  for f in "${STATE_SYNC_DIR}/${os}"-*.json; do
+    [[ -f "$f" ]] || continue
+    local ver
+    ver=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "$f" 2>/dev/null \
+      | sed 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' | head -1) || true
+    [[ -n "$ver" ]] || continue
+    if [[ -f "${STATE_SYNC_DIR}/${os}-${ver}.ready" ]]; then
+      ver_status["$ver"]="[downloaded]"
+    elif [[ -f "${STATE_SYNC_DIR}/${os}-${ver}.dryrun-ok" ]]; then
+      ver_status["$ver"]="[dry-run ok]"
+    elif [[ -f "${STATE_SYNC_DIR}/${os}-${ver}.failed" ]]; then
+      ver_status["$ver"]="[failed]"
+    else
+      ver_status["$ver"]="[not yet]"
+    fi
+  done
+  local config_file="${OS_CONFIG_DIR}/${os}/sync.env"
+  if [[ -f "$config_file" ]]; then
+    local tracked
+    tracked=$(grep '^TRACKED_VERSIONS=' "$config_file" 2>/dev/null \
+      | cut -d= -f2- | tr -d '"') || tracked=""
+    local v
+    for v in $tracked; do
+      if [[ -z "${ver_status[$v]+_}" ]]; then
+        ver_status["$v"]="[not yet]"
+      fi
+    done
+  fi
+  local ver
+  for ver in $(printf '%s\n' "${!ver_status[@]}" | sort -Vr); do
+    echo "${ver} ${ver_status[$ver]}"
+  done
+}
+
+# Print numbered version list for an OS, read user choice, echo version to stdout.
+# Prompts and errors go to stderr so this works in command substitution.
+_sync_select_version() {
+  local os="$1"
+  local versions=()
+  local line
+  while IFS= read -r line; do
+    versions+=("$line")
+  done < <(_sync_list_versions_for_os "$os")
+  if [[ ${#versions[@]} -eq 0 ]]; then
+    echo "  No versions found for ${os}." >&2; return 1
+  fi
+  echo "  Select version for ${os}:" >&2
+  local i=1
+  for line in "${versions[@]}"; do
+    printf "    %d) %s\n" "$i" "$line" >&2
+    (( i++ )) || true
+  done
+  printf "  Select [1-%d]: " "${#versions[@]}" >&2
+  local choice; read -r choice || return 1
+  if ! [[ "$choice" =~ ^[0-9]+$ ]]; then
+    echo "  Invalid selection." >&2; return 1
+  fi
+  local idx=$(( choice - 1 ))
+  if [[ $idx -lt 0 ]] || [[ $idx -ge ${#versions[@]} ]]; then
+    echo "  Invalid selection." >&2; return 1
+  fi
+  echo "${versions[$idx]%% *}"
+}
+
 # ─── JSON helpers ─────────────────────────────────────────────────────────────
 # Escape a string for embedding in a JSON value (double-quotes, backslashes, newlines)
 json_escape() {

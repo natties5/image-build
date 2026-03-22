@@ -26,9 +26,12 @@ Usage:
 
 Commands:
   (no args)                       Open interactive menu
-  sync  dry-run  --os <os>        Discover image without downloading
-         download --os <os>       Download + verify image
-                 --version <ver>  Limit to one version
+  sync  dry-run                          Discover all OS (no download)
+        dry-run --os <os>                Discover one OS
+        dry-run --os <os> --version <v>  Discover one version
+        download --os <os> --version <v> Download one version
+        download --os <os>               Download all versions for OS
+        download --all                   Download all OS, all versions
   build  import  --os <os> --version <ver>   Import base image to Glance
          create  ...                          Create VM from image
          configure ...                        Configure guest OS
@@ -129,19 +132,23 @@ cmd_settings_validate() {
 menu_sync() {
   echo ""
   echo "--- Sync ---"
-  echo "  1) Dry-run Discover (all tracked versions)"
-  echo "  2) Dry-run Discover (select OS)"
-  echo "  3) Download (select OS)"
-  echo "  4) Show Sync Results"
-  echo "  5) Back"
-  echo -n "  Select [1-5]: "
+  echo "  1) Dry-run Discover  (all OS, all tracked versions)"
+  echo "  2) Dry-run Discover  (select OS)"
+  echo "  3) Download          (select OS → select version)"
+  echo "  4) Download          (select OS → all versions in that OS)"
+  echo "  5) Download ALL      (all OS, all tracked versions)"
+  echo "  6) Show Sync Results"
+  echo "  7) Back"
+  echo -n "  Select [1-7]: "
   local choice; read -r choice || return
   case "$choice" in
     1) _menu_sync_all_dry_run ;;
     2) _menu_sync_os_dry_run ;;
-    3) _menu_sync_os_download ;;
-    4) cmd_status_sync ;;
-    5) return ;;
+    3) _menu_sync_os_version_download ;;
+    4) _menu_sync_os_all_versions_download ;;
+    5) _menu_sync_all_download ;;
+    6) _menu_sync_show_results ;;
+    7) return ;;
     *) echo "Invalid choice." ;;
   esac
 }
@@ -155,19 +162,87 @@ _menu_sync_all_dry_run() {
 }
 
 _menu_sync_os_dry_run() {
-  echo -n "  Enter OS name (ubuntu/debian/fedora/almalinux/rocky): "
-  local os; read -r os || return
+  local os
+  os=$(_sync_select_os) || return
   bash "${PHASES_DIR}/sync_download.sh" --os "$os" --dry-run
 }
 
-_menu_sync_os_download() {
-  echo -n "  Enter OS name: "
-  local os; read -r os || return
-  echo -n "  Enter version (leave blank for all tracked): "
-  local ver; read -r ver || return
-  local args=(--os "$os")
-  [[ -n "$ver" ]] && args+=(--version "$ver")
-  bash "${PHASES_DIR}/sync_download.sh" "${args[@]}"
+_menu_sync_os_version_download() {
+  local os
+  os=$(_sync_select_os) || return
+  local ver
+  ver=$(_sync_select_version "$os") || return
+  echo "  Starting download: $os $ver ..."
+  echo "  (Ctrl+C to cancel download at any time)"
+  bash "${PHASES_DIR}/sync_download.sh" --os "$os" --version "$ver"
+}
+
+_menu_sync_os_all_versions_download() {
+  local os
+  os=$(_sync_select_os) || return
+  echo ""
+  echo "  Versions for ${os}:"
+  _sync_list_versions_for_os "$os" | while IFS= read -r line; do
+    echo "    $line"
+  done
+  echo ""
+  echo "  Will download all tracked versions for: $os"
+  bash "${PHASES_DIR}/sync_download.sh" --os "$os"
+}
+
+_menu_sync_all_download() {
+  echo "  Starting download: all OS, all tracked versions"
+  echo "  (Ctrl+C to cancel at any time)"
+  local os
+  for os in ubuntu debian fedora almalinux rocky; do
+    bash "${PHASES_DIR}/sync_download.sh" --os "$os" || true
+  done
+}
+
+_menu_sync_show_results() {
+  local files=()
+  local f
+  for f in "${STATE_SYNC_DIR}"/*.json; do
+    [[ -f "$f" ]] && files+=("$f") || true
+  done
+  if [[ ${#files[@]} -eq 0 ]]; then
+    echo "  (no sync results yet — run Dry-run first)"
+    return
+  fi
+  echo ""
+  echo "=== Sync Results ==="
+  printf "%-12s  %-8s  %-8s  %-10s  %-8s  %s\n" \
+    "OS" "VERSION" "FORMAT" "SIZE" "HASH_OK" "STATUS"
+  printf "%-12s  %-8s  %-8s  %-10s  %-8s  %s\n" \
+    "──────────" "───────" "──────" "─────────" "───────" "──────────"
+  for f in "${files[@]}"; do
+    local base os ver fmt wspath size hash_ok status
+    base="$(basename "$f" .json)"
+    os=$(grep -o '"os_family"[[:space:]]*:[[:space:]]*"[^"]*"' "$f" 2>/dev/null \
+      | sed 's/.*"os_family"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' | head -1) || true
+    ver=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "$f" 2>/dev/null \
+      | sed 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' | head -1) || true
+    fmt=$(grep -o '"format_selected"[[:space:]]*:[[:space:]]*"[^"]*"' "$f" 2>/dev/null \
+      | sed 's/.*"format_selected"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' | head -1) || true
+    wspath=$(grep -o '"workspace_path"[[:space:]]*:[[:space:]]*"[^"]*"' "$f" 2>/dev/null \
+      | sed 's/.*"workspace_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' | head -1) || true
+    size="-"
+    if [[ -n "$wspath" && -f "$wspath" ]]; then
+      size=$(du -sh "$wspath" 2>/dev/null | cut -f1) || size="-"
+    fi
+    if [[ -f "${STATE_SYNC_DIR}/${base}.ready" ]]; then
+      status="downloaded"; hash_ok="YES"
+    elif [[ -f "${STATE_SYNC_DIR}/${base}.dryrun-ok" ]]; then
+      status="dry-run ok"; hash_ok="-"
+    elif [[ -f "${STATE_SYNC_DIR}/${base}.failed" ]]; then
+      status="failed"; hash_ok="NO"
+    else
+      status="pending"; hash_ok="-"
+    fi
+    printf "%-12s  %-8s  %-8s  %-10s  %-8s  %s\n" \
+      "${os:-?}" "${ver:-?}" "${fmt:-?}" "$size" "$hash_ok" "$status"
+  done
+  echo ""
 }
 
 # ─── Build menu (skeleton) ────────────────────────────────────────────────────
@@ -238,8 +313,42 @@ dispatch_command() {
     sync)
       local subcmd="${1:-}"; shift || true
       case "$subcmd" in
-        dry-run)  bash "${PHASES_DIR}/sync_download.sh" --dry-run "$@" ;;
-        download) bash "${PHASES_DIR}/sync_download.sh" "$@" ;;
+        dry-run)
+          # sync dry-run                          → dry-run all OS
+          # sync dry-run --os <os>                → dry-run one OS
+          # sync dry-run --os <os> --version <v>  → dry-run one version
+          if [[ $# -eq 0 ]]; then
+            local os
+            for os in ubuntu debian fedora almalinux rocky; do
+              echo "  --- dry-run: $os ---"
+              bash "${PHASES_DIR}/sync_download.sh" --os "$os" --dry-run || true
+            done
+          else
+            bash "${PHASES_DIR}/sync_download.sh" --dry-run "$@"
+          fi
+          ;;
+        download)
+          # sync download --os <os> --version <v> → download one version
+          # sync download --os <os>               → download all versions in OS
+          # sync download --all                   → download all OS all versions
+          local _all_flag=false
+          local _remaining=()
+          while [[ $# -gt 0 ]]; do
+            case "$1" in
+              --all) _all_flag=true; shift ;;
+              *) _remaining+=("$1"); shift ;;
+            esac
+          done
+          if $_all_flag; then
+            echo "  Starting download: all OS, all tracked versions"
+            local os
+            for os in ubuntu debian fedora almalinux rocky; do
+              bash "${PHASES_DIR}/sync_download.sh" --os "$os" || true
+            done
+          else
+            bash "${PHASES_DIR}/sync_download.sh" "${_remaining[@]}"
+          fi
+          ;;
         *) util_die "Unknown sync subcommand: ${subcmd}. Try: dry-run | download" ;;
       esac
       ;;
