@@ -1,0 +1,13 @@
+[2026-03-21T19:01:17Z] [INFO] === sync_download: rocky 8 [dry-run] ===
+[2026-03-21T19:01:17Z] [INFO] Index URL: https://dl.rockylinux.org/pub/rocky/8/images/x86_64
+[2026-03-21T19:01:18Z] [INFO] Fetching checksum: https://dl.rockylinux.org/pub/rocky/8/images/x86_64/CHECKSUM
+[2026-03-21T19:01:19Z] [INFO] Checksum source: https://dl.rockylinux.org/pub/rocky/8/images/x86_64/CHECKSUM (58 raw lines)
+[2026-03-21T19:01:19Z] [INFO] Parsed entries: 29
+[2026-03-21T19:01:19Z] [INFO] Candidate count (before scoring): 1
+[2026-03-21T19:01:20Z] [INFO] Selected: Rocky-8-GenericCloud.latest.x86_64.qcow2 [arch=x86_64 fmt=qcow2 sa=0 sf=0]
+[2026-03-21T19:01:20Z] [INFO] Winner:  Rocky-8-GenericCloud.latest.x86_64.qcow2
+[2026-03-21T19:01:20Z] [INFO]   URL:   https://dl.rockylinux.org/pub/rocky/8/images/x86_64/Rocky-8-GenericCloud.latest.x86_64.qcow2
+[2026-03-21T19:01:20Z] [INFO]   Hash:  e56066c58606191e96184de9a9183a3af33c59bcbd8740d8b10ca054a7a89c14 (sha256)
+[2026-03-21T19:01:20Z] [INFO]   Arch:  x86_64  Format: qcow2
+[2026-03-21T19:01:20Z] [INFO] Manifest written: /c/Users/natti/Documents/git/image-build/runtime/state/sync/rocky-8.json
+[2026-03-21T19:01:21Z] [INFO] Dry-run COMPLETE: rocky 8
