@@ -5,6 +5,7 @@ settings/openrc-file/*.sh
 !settings/openrc-file/test-*.sh
 settings/openrc-file/*.env
 settings/openrc-file/*.rc
+settings/openrc-file/openrc-*
 runtime/session/
 
 # ─── Workspace (downloaded images — large binaries) ───────────────────────────
