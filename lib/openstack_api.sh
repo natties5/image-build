@@ -362,31 +362,34 @@ os_attach_floating_ip() {
 
 # ─── Final image publish operations ───────────────────────────────────────────
 
-# Upload a volume as a new Glance image
+# Upload a volume as a new Glance image.
 # Note: --property and --private are not supported with --volume on most OpenStack versions.
-# We create the image first, then set properties and visibility in a second step.
+# The -c id output from image create --volume may return the volume ID instead of image ID.
+# We trigger the upload, then search Glance by name to get the real image ID.
 # Usage: os_upload_volume_to_image <volume_id> <image_name> <os_distro> <os_version>
 os_upload_volume_to_image() {
   local vol_id="$1" name="$2" distro="$3" ver="$4"
   util_log_info "Uploading volume $vol_id as image: $name"
-  # Step 1: create image from volume (no --property or --private here)
-  local img_id
-  img_id="$(openstack_cmd image create \
+  # Trigger the upload (ignore stdout — returned id may be volume id, not image id)
+  openstack_cmd image create \
     --disk-format qcow2 \
     --container-format bare \
     --volume "$vol_id" \
-    "$name" \
-    -f value -c id 2>/dev/null)" || true
-  if [[ -z "$img_id" ]]; then
-    util_log_warn "image create returned empty id — searching by name..."
+    "$name" >/dev/null 2>&1 || true
+  # Wait up to 120s for the image to appear in Glance by name
+  local img_id="" elapsed=0
+  while (( elapsed < 120 )); do
     img_id="$(os_find_image_id_by_name "$name" 2>/dev/null || echo '')"
-  fi
+    [[ -n "$img_id" ]] && break
+    sleep 5
+    elapsed=$(( elapsed + 5 ))
+  done
   if [[ -z "$img_id" ]]; then
-    util_log_error "os_upload_volume_to_image: failed to get image ID"
+    util_log_error "os_upload_volume_to_image: image '$name' not found in Glance after 120s"
     return 1
   fi
-  util_log_info "Image created from volume: $img_id — setting metadata..."
-  # Step 2: set properties and visibility
+  util_log_info "Image found in Glance: $img_id — setting metadata..."
+  # Set properties and visibility (separate step — not supported with --volume)
   openstack_cmd image set \
     --property os_distro="$distro" \
     --property os_version="$ver" \
