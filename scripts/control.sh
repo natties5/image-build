@@ -1235,12 +1235,341 @@ _menu_sync_show_results() {
 }
 
 # ─── Build menu (skeleton) ────────────────────────────────────────────────────
+# ─── Build helpers ────────────────────────────────────────────────────────────
+
+_build_select_os() {
+  local os_list="ubuntu debian fedora almalinux rocky"
+  local os ready_vers dryrun_vers label
+  local -a display=()
+  local -a valid_oses=()
+
+  for os in $os_list; do
+    ready_vers=$(_build_list_ready | awk -v o="$os" \
+      '$1==o && $3=="ready" {print $2}' | sort -V | tr '\n' ' ')
+    dryrun_vers=$(_build_list_ready | awk -v o="$os" \
+      '$1==o && $3=="dryrun-only" {print $2}' | sort -V | tr '\n' ' ')
+
+    if [[ -n "$ready_vers" ]]; then
+      label="$os  [ready: ${ready_vers% }]"
+      display+=("$label")
+      valid_oses+=("$os")
+    elif [[ -n "$dryrun_vers" ]]; then
+      label="$os  [not downloaded: ${dryrun_vers% }]"
+      display+=("$label")
+      valid_oses+=("$os")
+    fi
+  done
+
+  if [[ ${#valid_oses[@]} -eq 0 ]]; then
+    echo "  No OS versions found. Run Sync → Download first." >&2
+    return 1
+  fi
+
+  echo "  Select OS:" >&2
+  local i=1
+  for label in "${display[@]}"; do
+    printf "    %d) %s\n" "$i" "$label" >&2
+    (( i++ )) || true
+  done
+  echo -n "  Select [1-${#valid_oses[@]}]: " >&2
+  local choice
+  read -r choice || return 1
+  [[ "$choice" =~ ^[0-9]+$ ]] || return 1
+  local idx=$(( choice - 1 ))
+  [[ $idx -ge 0 && $idx -lt ${#valid_oses[@]} ]] || return 1
+  printf '%s' "${valid_oses[$idx]}"
+}
+
+_build_select_version() {
+  local os="$1"
+  local -a versions=()
+  local -a statuses=()
+  local ver st
+
+  while IFS=' ' read -r _ ver st; do
+    versions+=("$ver")
+    statuses+=("$st")
+  done < <(_build_list_ready | awk -v o="$os" '$1==o' | sort -t' ' -k2 -V)
+
+  if [[ ${#versions[@]} -eq 0 ]]; then
+    echo "  No versions found for $os." >&2
+    return 1
+  fi
+
+  echo "  Select version for $os:" >&2
+  local i=1
+  for ver in "${versions[@]}"; do
+    st="${statuses[$((i-1))]}"
+    if [[ "$st" == "ready" ]]; then
+      printf "    %d) %s  [ready]\n" "$i" "$ver" >&2
+    else
+      printf "    %d) %s  [not downloaded — run Sync first]\n" "$i" "$ver" >&2
+    fi
+    (( i++ )) || true
+  done
+  echo -n "  Select [1-${#versions[@]}]: " >&2
+  local choice
+  read -r choice || return 1
+  [[ "$choice" =~ ^[0-9]+$ ]] || return 1
+  local idx=$(( choice - 1 ))
+  [[ $idx -ge 0 && $idx -lt ${#versions[@]} ]] || return 1
+
+  if [[ "${statuses[$idx]}" != "ready" ]]; then
+    echo "  ✗ Version ${versions[$idx]} is not downloaded." >&2
+    echo "  → Go to Sync → Download first." >&2
+    return 1
+  fi
+  printf '%s' "${versions[$idx]}"
+}
+
+_build_preflight() {
+  local os="$1" version="$2"
+  local ok=true
+
+  echo "  Checking preflight for $os $version..."
+
+  if [[ -z "${OS_AUTH_URL:-}" ]]; then
+    echo "  ✗ OpenRC not loaded — go to Settings → Load OpenRC first"
+    ok=false
+  else
+    echo "  ✓ OpenRC loaded (${OS_AUTH_URL})"
+  fi
+
+  if [[ ! -f "${OPENSTACK_ENV}" ]]; then
+    echo "  ✗ settings/openstack.env missing"
+    ok=false
+  else
+    echo "  ✓ openstack.env exists"
+  fi
+
+  if [[ ! -f "${GUEST_ACCESS_ENV}" ]]; then
+    echo "  ✗ settings/guest-access.env missing — go to Settings → Edit Guest Access"
+    ok=false
+  else
+    echo "  ✓ guest-access.env exists"
+  fi
+
+  local sync_ready="${STATE_SYNC_DIR}/${os}-${version}.ready"
+  if [[ ! -f "$sync_ready" ]]; then
+    echo "  ✗ $os $version not downloaded — go to Sync → Download first"
+    ok=false
+  else
+    echo "  ✓ sync ready: $os $version"
+  fi
+
+  local guest_cfg="${CONFIG_DIR}/guest/${os}/${version}.env"
+  local guest_default="${CONFIG_DIR}/guest/${os}/default.env"
+  if [[ ! -f "$guest_cfg" && ! -f "$guest_default" ]]; then
+    echo "  ✗ guest config missing: config/guest/${os}/${version}.env"
+    ok=false
+  else
+    echo "  ✓ guest config found"
+  fi
+
+  $ok && return 0 || return 1
+}
+
+_build_run_pipeline() {
+  local os="$1" version="$2"
+  local phase rc
+
+  local phases="import_base create_vm configure_guest clean_guest publish_final"
+
+  for phase in $phases; do
+    echo ""
+    echo "  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  PHASE: $phase  ($os $version)"
+    echo "  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    bash "${PHASES_DIR}/${phase}.sh" --os "$os" --version "$version"
+    rc=$?
+    if [[ $rc -ne 0 ]]; then
+      echo ""
+      echo "  ✗ PHASE FAILED: $phase (exit $rc)"
+      echo "  Pipeline stopped. Check runtime/logs/$phase/${os}-${version}.log"
+      return 1
+    fi
+    echo "  ✓ PHASE DONE: $phase"
+  done
+
+  echo ""
+  echo "  ✓ PIPELINE COMPLETE: $os $version"
+}
+
+_build_run_one_phase() {
+  local os="$1" version="$2" phase="$3"
+
+  case "$phase" in
+    create_vm)
+      [[ -f "${STATE_DIR}/import/${os}-${version}.ready" ]] || {
+        echo "  ✗ import not done yet — run Import Base Image first"
+        return 1
+      } ;;
+    configure_guest)
+      [[ -f "${STATE_DIR}/create/${os}-${version}.ready" ]] || {
+        echo "  ✗ create not done yet — run Create VM first"
+        return 1
+      } ;;
+    clean_guest)
+      [[ -f "${STATE_DIR}/configure/${os}-${version}.ready" ]] || {
+        echo "  ✗ configure not done yet — run Configure Guest first"
+        return 1
+      } ;;
+    publish_final)
+      [[ -f "${STATE_DIR}/clean/${os}-${version}.ready" ]] || {
+        echo "  ✗ clean not done yet — run Final Clean first"
+        return 1
+      } ;;
+  esac
+
+  echo "  Running: $phase ($os $version)..."
+  bash "${PHASES_DIR}/${phase}.sh" --os "$os" --version "$version"
+  local rc=$?
+  [[ $rc -eq 0 ]] \
+    && echo "  ✓ $phase DONE" \
+    || echo "  ✗ $phase FAILED (exit $rc)"
+  return $rc
+}
+
+_build_step_status() {
+  local os="$1" ver="$2"
+  local phases="import create configure clean publish"
+  local phase icon
+  echo "  Current state:"
+  for phase in $phases; do
+    if [[ -f "${STATE_DIR}/${phase}/${os}-${ver}.ready" ]]; then
+      icon="✓"
+    elif [[ -f "${STATE_DIR}/${phase}/${os}-${ver}.failed" ]]; then
+      icon="✗"
+    else
+      icon="○"
+    fi
+    printf "    %s %s\n" "$icon" "$phase"
+  done
+  echo ""
+}
+
+_menu_build_auto_os_latest() {
+  local os ver
+  os=$(_build_select_os) || return
+  ver=$(_build_latest_ready_version "$os")
+  if [[ -z "$ver" ]]; then
+    echo "  No downloaded versions for $os. Run Sync → Download first."
+    return
+  fi
+  echo "  Auto-selected: $os $ver (latest ready)"
+  _build_preflight "$os" "$ver" || return
+  echo "  Starting pipeline: $os $ver"
+  _build_run_pipeline "$os" "$ver"
+}
+
+_menu_build_auto_os_all() {
+  local os ver
+  os=$(_build_select_os) || return
+  local versions
+  versions=$(_build_all_ready_versions "$os")
+  if [[ -z "$versions" ]]; then
+    echo "  No downloaded versions for $os. Run Sync → Download first."
+    return
+  fi
+  echo "  Will run pipeline for: $os — versions: $(echo "$versions" | tr '\n' ' ')"
+  for ver in $versions; do
+    echo ""
+    echo "  ══════════════════════════════════════"
+    echo "  Starting: $os $ver"
+    echo "  ══════════════════════════════════════"
+    _build_preflight "$os" "$ver" || continue
+    _build_run_pipeline "$os" "$ver" || true
+  done
+  echo ""
+  echo "  ✓ All versions processed for $os"
+}
+
+_menu_build_auto_all() {
+  local all_ready
+  all_ready=$(_build_list_ready | awk '$3=="ready" {print $1, $2}' | sort -k1,1 -k2,2V)
+  if [[ -z "$all_ready" ]]; then
+    echo "  No downloaded images found. Run Sync → Download first."
+    return
+  fi
+  echo "  Will run pipeline for ALL:"
+  echo "$all_ready" | while read -r os ver; do
+    echo "    - $os $ver"
+  done
+  echo ""
+  echo "$all_ready" | while read -r os ver; do
+    echo ""
+    echo "  ══════════════════════════════════════"
+    echo "  Starting: $os $ver"
+    echo "  ══════════════════════════════════════"
+    _build_preflight "$os" "$ver" || continue
+    _build_run_pipeline "$os" "$ver" || true
+  done
+  echo ""
+  echo "  ✓ All OS all versions processed"
+}
+
+_menu_build_manual_full() {
+  local os ver
+  os=$(_build_select_os)   || return
+  ver=$(_build_select_version "$os") || return
+  _build_preflight "$os" "$ver" || return
+  echo "  Starting full pipeline: $os $ver"
+  _build_run_pipeline "$os" "$ver"
+}
+
+_menu_build_manual_step() {
+  local os ver
+  os=$(_build_select_os)   || return
+  ver=$(_build_select_version "$os") || return
+  _build_preflight "$os" "$ver" || return
+
+  while true; do
+    echo ""
+    echo "  --- Build: Step-by-Step ($os $ver) ---"
+    _build_step_status "$os" "$ver"
+    echo "  1) Import Base Image"
+    echo "  2) Create VM"
+    echo "  3) Configure Guest"
+    echo "  4) Final Clean"
+    echo "  5) Publish Final Image"
+    echo "  6) Back"
+    echo -n "  Select [1-6]: "
+    local sc; read -r sc || return
+    case "$sc" in
+      1) _build_run_one_phase "$os" "$ver" "import_base" ;;
+      2) _build_run_one_phase "$os" "$ver" "create_vm" ;;
+      3) _build_run_one_phase "$os" "$ver" "configure_guest" ;;
+      4) _build_run_one_phase "$os" "$ver" "clean_guest" ;;
+      5) _build_run_one_phase "$os" "$ver" "publish_final" ;;
+      6) return ;;
+      *) echo "  Invalid choice." ;;
+    esac
+  done
+}
+
+# ─── Build menu ───────────────────────────────────────────────────────────────
 menu_build() {
-  echo ""
-  echo "--- Build (not yet implemented) ---"
-  echo "  Phases: import -> create -> configure -> clean -> publish"
-  echo "  [TODO] see 06_OPENSTACK_PIPELINE_DESIGN.md"
-  echo ""
+  while true; do
+    echo ""
+    echo "--- Build ---"
+    echo "  1) Auto   — select OS  → run latest version"
+    echo "  2) Auto   — select OS  → run all versions"
+    echo "  3) Auto   — ALL OS, all versions"
+    echo "  4) Manual — select OS + version (full pipeline)"
+    echo "  5) Manual — select OS + version (step-by-step)"
+    echo "  6) Back"
+    echo -n "  Select [1-6]: "
+    local choice; read -r choice || return
+    case "$choice" in
+      1) _menu_build_auto_os_latest ;;
+      2) _menu_build_auto_os_all ;;
+      3) _menu_build_auto_all ;;
+      4) _menu_build_manual_full ;;
+      5) _menu_build_manual_step ;;
+      6) return ;;
+      *) echo "  Invalid choice." ;;
+    esac
+  done
 }
 
 # ─── Resume menu (skeleton) ───────────────────────────────────────────────────

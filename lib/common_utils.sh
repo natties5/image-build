@@ -300,3 +300,40 @@ json_write_file() {
   util_ensure_parent_dir "$path"
   printf '%s\n' "$content" > "$path"
 }
+
+# ─── Build state helpers ───────────────────────────────────────────────────────
+
+# Returns list of "os version status" lines where status is:
+#   ready        → runtime/state/sync/<os>-<ver>.ready exists
+#   dryrun-only  → only .dryrun-ok exists (not downloaded)
+# Skips entries with neither flag.
+_build_list_ready() {
+  local os_list="ubuntu debian fedora almalinux rocky"
+  local os ver base f status
+  for os in $os_list; do
+    for f in "${STATE_SYNC_DIR}/${os}"-*.json; do
+      [[ -f "$f" ]] || continue
+      base="$(basename "$f" .json)"
+      ver="${base#${os}-}"
+      if [[ -f "${STATE_SYNC_DIR}/${base}.ready" ]]; then
+        echo "$os $ver ready"
+      elif [[ -f "${STATE_SYNC_DIR}/${base}.dryrun-ok" ]]; then
+        echo "$os $ver dryrun-only"
+      fi
+    done
+  done
+}
+
+# Returns latest version (sort -V) for a given OS that has .ready
+_build_latest_ready_version() {
+  local os="$1"
+  _build_list_ready | awk -v o="$os" '$1==o && $3=="ready" {print $2}' \
+    | sort -V | tail -1
+}
+
+# Returns all versions for a given OS that have .ready
+_build_all_ready_versions() {
+  local os="$1"
+  _build_list_ready | awk -v o="$os" '$1==o && $3=="ready" {print $2}' \
+    | sort -V
+}
