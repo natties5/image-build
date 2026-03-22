@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# phases/configure_guest.sh — Full guest OS configure phase driven by GUEST_* config vars.
+# phases/configure_guest.sh ï¿½ Full guest OS configure phase driven by GUEST_* config vars.
 # Usage: bash phases/configure_guest.sh --os <name> --version <ver>
 set -Eeuo pipefail
 
@@ -151,7 +151,12 @@ _STEPS+=("baseline-repo")
 util_log_info "--- Phase 4: Repo Backup ---"
 _BACKUP_DIR="${GUEST_REPO_BACKUP_DIR:-/var/backups/image-build/repos}"
 _BACKUP_EXIT=0
-_BACKUP_OUT="$(_gssh "mkdir -p $_BACKUP_DIR; cp /etc/apt/sources.list $_BACKUP_DIR/ 2>/dev/null || true; cp /etc/apt/sources.list.d/*.list $_BACKUP_DIR/ 2>/dev/null || true; cp /etc/apt/sources.list.d/*.sources $_BACKUP_DIR/ 2>/dev/null || true; echo backup-ok" 2>&1)" || _BACKUP_EXIT=$?
+_REPO_DRIVER="${GUEST_REPO_DRIVER:-apt}"
+if [[ "$_REPO_DRIVER" == "dnf-repo" ]]; then
+  _BACKUP_OUT="$(_gssh "mkdir -p $_BACKUP_DIR; cp /etc/yum.repos.d/*.repo $_BACKUP_DIR/ 2>/dev/null || true; echo backup-ok" 2>&1)" || _BACKUP_EXIT=$?
+else
+  _BACKUP_OUT="$(_gssh "mkdir -p $_BACKUP_DIR; cp /etc/apt/sources.list $_BACKUP_DIR/ 2>/dev/null || true; cp /etc/apt/sources.list.d/*.list $_BACKUP_DIR/ 2>/dev/null || true; cp /etc/apt/sources.list.d/*.sources $_BACKUP_DIR/ 2>/dev/null || true; echo backup-ok" 2>&1)" || _BACKUP_EXIT=$?
+fi
 util_log_info "  [backup] $_BACKUP_OUT (exit=${_BACKUP_EXIT})"
 _STEPS+=("repo-backup")
 
@@ -173,7 +178,11 @@ if [[ "${GUEST_ENABLE_OLS_FAILOVER:-0}" == "1" ]]; then
     _OLS_SKIPPED=true
   elif [[ "$_OLS_REACHABLE" == "true" ]]; then
     util_log_info "  Injecting OLS mirror: $_OLS_URL"
-    _INJ_OUT="$(_gssh "for f in /etc/apt/sources.list.d/*.sources; do [ -f \"\$f\" ] || continue; sed -i 's|URIs: http://archive.ubuntu.com/ubuntu|URIs: $_OLS_URL/ubuntu|g' \"\$f\" 2>/dev/null || true; sed -i 's|URIs: http://security.ubuntu.com/ubuntu|URIs: $_OLS_URL/ubuntu|g' \"\$f\" 2>/dev/null || true; done; if [ -f /etc/apt/sources.list ]; then sed -i 's|http://archive.ubuntu.com/ubuntu|$_OLS_URL/ubuntu|g' /etc/apt/sources.list 2>/dev/null || true; sed -i 's|http://security.ubuntu.com/ubuntu|$_OLS_URL/ubuntu|g' /etc/apt/sources.list 2>/dev/null || true; fi; echo inject-done" 2>&1)" || true
+    if [[ "${GUEST_REPO_DRIVER:-apt}" == "dnf-repo" ]]; then
+      _INJ_OUT="$(_gssh "for f in /etc/yum.repos.d/*.repo; do [ -f \"\$f\" ] || continue; sed -i 's|^mirrorlist=|#mirrorlist=|g' \"\$f\" 2>/dev/null || true; sed -i 's|^metalink=|#metalink=|g' \"\$f\" 2>/dev/null || true; sed -i \"s|^#baseurl=http://dl.rockylinux.org|baseurl=$_OLS_URL|g\" \"\$f\" 2>/dev/null || true; sed -i \"s|^#baseurl=https://dl.rockylinux.org|baseurl=$_OLS_URL|g\" \"\$f\" 2>/dev/null || true; done; echo inject-done" 2>&1)" || true
+    else
+      _INJ_OUT="$(_gssh "for f in /etc/apt/sources.list.d/*.sources; do [ -f \"\$f\" ] || continue; sed -i 's|URIs: http://archive.ubuntu.com/ubuntu|URIs: $_OLS_URL/ubuntu|g' \"\$f\" 2>/dev/null || true; sed -i 's|URIs: http://security.ubuntu.com/ubuntu|URIs: $_OLS_URL/ubuntu|g' \"\$f\" 2>/dev/null || true; done; if [ -f /etc/apt/sources.list ]; then sed -i 's|http://archive.ubuntu.com/ubuntu|$_OLS_URL/ubuntu|g' /etc/apt/sources.list 2>/dev/null || true; sed -i 's|http://security.ubuntu.com/ubuntu|$_OLS_URL/ubuntu|g' /etc/apt/sources.list 2>/dev/null || true; fi; echo inject-done" 2>&1)" || true
+    fi
     util_log_info "  [ols-inject] $_INJ_OUT"
 
     _VAL_CMD="${GUEST_REPO_VALIDATION_COMMAND:-apt-get clean && apt-get update}"
@@ -184,7 +193,11 @@ if [[ "${GUEST_ENABLE_OLS_FAILOVER:-0}" == "1" ]]; then
       util_log_warn "  OLS validation failed (exit=$_VAL_EXIT) -- rolling back"
       _FAILBACK="${GUEST_REPO_FAILBACK_ACTION:-restore-backup}"
       if [[ "$_FAILBACK" == "restore-backup" ]]; then
-        _RB_OUT="$(_gssh "cp $_BACKUP_DIR/*.list /etc/apt/sources.list.d/ 2>/dev/null || true; cp $_BACKUP_DIR/*.sources /etc/apt/sources.list.d/ 2>/dev/null || true; cp $_BACKUP_DIR/sources.list /etc/apt/ 2>/dev/null || true; DEBIAN_FRONTEND=noninteractive apt-get update; echo rollback-done" 2>&1)" || true
+        if [[ "${GUEST_REPO_DRIVER:-apt}" == "dnf-repo" ]]; then
+          _RB_OUT="$(_gssh "cp $_BACKUP_DIR/*.repo /etc/yum.repos.d/ 2>/dev/null || true; dnf clean all; dnf -y makecache; echo rollback-done" 2>&1)" || true
+        else
+          _RB_OUT="$(_gssh "cp $_BACKUP_DIR/*.list /etc/apt/sources.list.d/ 2>/dev/null || true; cp $_BACKUP_DIR/*.sources /etc/apt/sources.list.d/ 2>/dev/null || true; cp $_BACKUP_DIR/sources.list /etc/apt/ 2>/dev/null || true; DEBIAN_FRONTEND=noninteractive apt-get update; echo rollback-done" 2>&1)" || true
+        fi
         while IFS= read -r _line; do util_log_info "  [rollback] $_line"; done <<< "$_RB_OUT"
         util_log_info "  OLS failed -- rolled back to official repo"
       fi
@@ -271,7 +284,12 @@ fi
 if [[ "${GUEST_SET_LOCALE:-0}" == "1" ]]; then
   _LOCALE_GEN="${GUEST_LOCALE_GENERATION:-en_US.UTF-8 UTF-8}"
   _LOCALE_VAL="${GUEST_LOCALE:-en_US.UTF-8}"
-  _LOCALE_OUT="$(_gssh "locale-gen \"$_LOCALE_GEN\" && update-locale LANG=$_LOCALE_VAL && echo locale-ok" 2>&1)" || true
+  _LOCALE_METHOD="${GUEST_LOCALE_METHOD:-locale-gen}"
+  if [[ "$_LOCALE_METHOD" == "localectl" ]]; then
+    _LOCALE_OUT="$(_gssh "localectl set-locale LANG=$_LOCALE_VAL || true; echo locale-ok" 2>&1)" || true
+  else
+    _LOCALE_OUT="$(_gssh "locale-gen \"$_LOCALE_GEN\" && update-locale LANG=$_LOCALE_VAL && echo locale-ok" 2>&1)" || true
+  fi
   util_log_info "  [locale] $_LOCALE_OUT"
   _STEPS+=("locale")
 fi
