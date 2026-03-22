@@ -89,6 +89,14 @@ _OLS_SKIPPED=false
 _REBOOT_DONE=false
 _STEPS=()
 
+_REPO_MODE_USED="official"
+_REPO_MODE_REASON="official_ok"
+_OLS_ATTEMPTED=false
+_OLS_REACHABLE=false
+_VAULT_ATTEMPTED=false
+_VAULT_REACHABLE=false
+_OFFICIAL_DEGRADED=false
+
 if ! command -v sshpass >/dev/null 2>&1; then
   util_log_info "  sshpass not found -- installing..."
   apt-get install -y sshpass >/dev/null 2>&1 || true
@@ -143,8 +151,14 @@ _BL_CMD="${GUEST_REPO_BASELINE_UPDATE_COMMAND:-apt-get update}"
 _BL_EXIT=0
 _BL_OUT="$(_gssh "DEBIAN_FRONTEND=noninteractive $_BL_CMD" 2>&1)" || _BL_EXIT=$?
 while IFS= read -r _line; do util_log_info "  [baseline] $_line"; done <<< "$_BL_OUT"
-if [[ $_BL_EXIT -ne 0 ]]; then _fail "Baseline repo test failed (exit=$_BL_EXIT)"; fi
-util_log_info "  Baseline repo OK"
+if [[ $_BL_EXIT -ne 0 ]]; then
+  _OFFICIAL_DEGRADED=true
+  _REPO_MODE_REASON="official_degraded"
+  util_log_warn "  official repo degraded at baseline"
+else
+  _OFFICIAL_DEGRADED=false
+  util_log_info "  official repo baseline OK"
+fi
 _STEPS+=("baseline-repo")
 
 # --- PHASE 4: Repo Backup ----------------------------------------------------
@@ -160,23 +174,22 @@ fi
 util_log_info "  [backup] $_BACKUP_OUT (exit=${_BACKUP_EXIT})"
 _STEPS+=("repo-backup")
 
-# --- PHASE 5: OLS Injection --------------------------------------------------
+# --- PHASE 5: Repo Selection (OLS -> vault -> official-fallback) -------------
+_OLS_ATTEMPTED=false
+_VAULT_ATTEMPTED=false
+
 if [[ "${GUEST_ENABLE_OLS_FAILOVER:-0}" == "1" ]]; then
   util_log_info "--- Phase 5: OLS Injection ---"
+  _OLS_ATTEMPTED=true
+
   _OLS_URL="${GUEST_OLS_URL:-http://mirrors.openlandscape.cloud}"
-  _OLS_REACHABLE=false
   _OLS_CHECK_OUT="$(_gssh "curl -s --max-time 10 $_OLS_URL -o /dev/null && echo ols-ok || echo ols-skip" 2>&1)" || true
+
   if echo "$_OLS_CHECK_OUT" | grep -q "ols-ok"; then
     _OLS_REACHABLE=true
-    util_log_info "  OLS reachable"
-  else
-    util_log_info "  OLS not reachable: $_OLS_CHECK_OUT"
-  fi
+    util_log_info "  OLS reachable: $_OLS_URL"
 
-  if [[ "${GUEST_OLS_SKIP_IF_UNAVAILABLE:-0}" == "1" && "$_OLS_REACHABLE" == "false" ]]; then
-    util_log_info "  OLS unavailable + GUEST_OLS_SKIP_IF_UNAVAILABLE=1 -- skipping injection"
-    _OLS_SKIPPED=true
-  elif [[ "$_OLS_REACHABLE" == "true" ]]; then
+    # Inject OLS (existing injection logic -- keep as-is)
     util_log_info "  Injecting OLS mirror: $_OLS_URL"
     if [[ "${GUEST_REPO_DRIVER:-apt}" == "dnf-repo" ]]; then
       _INJ_OUT="$(_gssh "for f in /etc/yum.repos.d/*.repo; do [ -f \"\$f\" ] || continue; sed -i 's|^mirrorlist=|#mirrorlist=|g' \"\$f\" 2>/dev/null || true; sed -i 's|^metalink=|#metalink=|g' \"\$f\" 2>/dev/null || true; sed -i \"s|^#baseurl=http://dl.rockylinux.org|baseurl=$_OLS_URL|g\" \"\$f\" 2>/dev/null || true; sed -i \"s|^#baseurl=https://dl.rockylinux.org|baseurl=$_OLS_URL|g\" \"\$f\" 2>/dev/null || true; done; echo inject-done" 2>&1)" || true
@@ -185,12 +198,22 @@ if [[ "${GUEST_ENABLE_OLS_FAILOVER:-0}" == "1" ]]; then
     fi
     util_log_info "  [ols-inject] $_INJ_OUT"
 
+    # Validate OLS
     _VAL_CMD="${GUEST_REPO_VALIDATION_COMMAND:-apt-get clean && apt-get update}"
     _VAL_EXIT=0
     _VAL_OUT="$(_gssh "DEBIAN_FRONTEND=noninteractive $_VAL_CMD" 2>&1)" || _VAL_EXIT=$?
     while IFS= read -r _line; do util_log_info "  [ols-val] $_line"; done <<< "$_VAL_OUT"
-    if [[ $_VAL_EXIT -ne 0 ]]; then
-      util_log_warn "  OLS validation failed (exit=$_VAL_EXIT) -- rolling back"
+
+    if [[ $_VAL_EXIT -eq 0 ]]; then
+      util_log_info "  OLS validation OK -> using OLS"
+      _REPO_MODE_USED="ols"
+      _REPO_MODE_REASON="ols_ok"
+      _OLS_USED=true
+    else
+      util_log_warn "  OLS validation FAILED (exit=$_VAL_EXIT)"
+      _REPO_MODE_REASON="ols_failed"
+      _OLS_USED=false
+      # Rollback OLS -> restore backup (existing rollback logic -- keep as-is)
       _FAILBACK="${GUEST_REPO_FAILBACK_ACTION:-restore-backup}"
       if [[ "$_FAILBACK" == "restore-backup" ]]; then
         if [[ "${GUEST_REPO_DRIVER:-apt}" == "dnf-repo" ]]; then
@@ -201,17 +224,97 @@ if [[ "${GUEST_ENABLE_OLS_FAILOVER:-0}" == "1" ]]; then
         while IFS= read -r _line; do util_log_info "  [rollback] $_line"; done <<< "$_RB_OUT"
         util_log_info "  OLS failed -- rolled back to official repo"
       fi
-    else
-      util_log_info "  OLS validation OK -- using OLS mirror"
-      _OLS_USED=true
+      util_log_info "  OLS rolled back -- trying vault next"
     fi
   else
-    util_log_info "  OLS not reachable, running with official repo"
+    util_log_info "  OLS not reachable: $_OLS_CHECK_OUT"
+    _OLS_REACHABLE=false
+    _REPO_MODE_REASON="ols_unreachable"
   fi
 else
   util_log_info "--- Phase 5: OLS disabled ---"
 fi
-_STEPS+=("ols")
+
+# -- Vault fallback (if OLS failed or unreachable) ----------------------------
+if [[ "${GUEST_ENABLE_VAULT_FALLBACK:-0}" == "1" ]] && \
+   [[ "$_REPO_MODE_USED" != "ols" ]]; then
+
+  _VAULT_URL="${GUEST_VAULT_URL:-}"
+  if [[ -z "$_VAULT_URL" ]]; then
+    util_log_info "  vault skipped: GUEST_VAULT_URL not set"
+  else
+    util_log_info "--- Phase 5b: Vault Fallback ---"
+    _VAULT_ATTEMPTED=true
+
+    _VAULT_CHECK="$(_gssh "curl -s --max-time 10 $_VAULT_URL -o /dev/null && echo vault-ok || echo vault-skip" 2>&1)" || true
+
+    if echo "$_VAULT_CHECK" | grep -q "vault-ok"; then
+      _VAULT_REACHABLE=true
+      util_log_info "  vault reachable: $_VAULT_URL"
+
+      # Inject vault -- same method as OLS injection but use VAULT_URL
+      if [[ "${GUEST_REPO_DRIVER:-apt}" == "dnf-repo" ]]; then
+        _VINJ_OUT="$(_gssh "for f in /etc/yum.repos.d/*.repo; do [ -f \"\$f\" ] || continue; sed -i 's|^mirrorlist=|#mirrorlist=|g' \"\$f\" 2>/dev/null || true; sed -i 's|^metalink=|#metalink=|g' \"\$f\" 2>/dev/null || true; sed -i \"s|^baseurl=https://dl.rockylinux.org|baseurl=$_VAULT_URL|g\" \"\$f\" 2>/dev/null || true; sed -i \"s|^baseurl=https://repo.almalinux.org|baseurl=$_VAULT_URL|g\" \"\$f\" 2>/dev/null || true; sed -i \"s|^#baseurl=|baseurl=$_VAULT_URL/|g\" \"\$f\" 2>/dev/null || true; done; echo vault-inject-done" 2>&1)" || true
+      else
+        _VINJ_OUT="$(_gssh "for f in /etc/apt/sources.list.d/*.sources; do [ -f \"\$f\" ] || continue; sed -i \"s|URIs: http://archive.ubuntu.com/ubuntu|URIs: $_VAULT_URL|g\" \"\$f\" 2>/dev/null || true; sed -i \"s|URIs: http://security.ubuntu.com/ubuntu|URIs: $_VAULT_URL|g\" \"\$f\" 2>/dev/null || true; sed -i \"s|URIs: https://deb.debian.org/debian|URIs: $_VAULT_URL|g\" \"\$f\" 2>/dev/null || true; done; if [ -f /etc/apt/sources.list ]; then sed -i \"s|http://archive.ubuntu.com/ubuntu|$_VAULT_URL|g\" /etc/apt/sources.list 2>/dev/null || true; sed -i \"s|http://security.ubuntu.com/ubuntu|$_VAULT_URL|g\" /etc/apt/sources.list 2>/dev/null || true; sed -i \"s|http://deb.debian.org/debian|$_VAULT_URL|g\" /etc/apt/sources.list 2>/dev/null || true; fi; echo vault-inject-done" 2>&1)" || true
+      fi
+      util_log_info "  [vault-inject] $_VINJ_OUT"
+
+      # Validate vault
+      _VVAL_CMD="${GUEST_VAULT_VALIDATION_COMMAND:-${GUEST_REPO_VALIDATION_COMMAND:-apt-get clean && apt-get update}}"
+      _VVAL_EXIT=0
+      _VVAL_OUT="$(_gssh "DEBIAN_FRONTEND=noninteractive $_VVAL_CMD" 2>&1)" || _VVAL_EXIT=$?
+      while IFS= read -r _line; do util_log_info "  [vault-val] $_line"; done <<< "$_VVAL_OUT"
+
+      if [[ $_VVAL_EXIT -eq 0 ]]; then
+        util_log_info "  vault validation OK -> using vault"
+        _REPO_MODE_USED="vault"
+        _REPO_MODE_REASON="ols_failed_vault_ok"
+      else
+        util_log_warn "  vault validation FAILED (exit=$_VVAL_EXIT)"
+        _VAULT_REACHABLE=false
+        _REPO_MODE_REASON="vault_failed"
+        # Rollback vault -> restore backup
+        _VROLLBACK="${GUEST_REPO_FAILBACK_ACTION:-restore-backup}"
+        if [[ "$_VROLLBACK" == "restore-backup" ]]; then
+          if [[ "${GUEST_REPO_DRIVER:-apt}" == "dnf-repo" ]]; then
+            _gssh "cp $_BACKUP_DIR/*.repo /etc/yum.repos.d/ 2>/dev/null || true; dnf clean all; echo vault-rollback-done" 2>&1 || true
+          else
+            _gssh "cp $_BACKUP_DIR/*.list /etc/apt/sources.list.d/ 2>/dev/null || true; cp $_BACKUP_DIR/*.sources /etc/apt/sources.list.d/ 2>/dev/null || true; cp $_BACKUP_DIR/sources.list /etc/apt/ 2>/dev/null || true; apt-get clean; echo vault-rollback-done" 2>&1 || true
+          fi
+          util_log_info "  vault rolled back -- trying official as last resort"
+        fi
+      fi
+    else
+      util_log_warn "  vault not reachable: $_VAULT_CHECK"
+      _VAULT_REACHABLE=false
+      _REPO_MODE_REASON="vault_unreachable"
+    fi
+  fi
+fi
+
+# -- Official last resort (if OLS + vault both failed) ------------------------
+if [[ "$_REPO_MODE_USED" != "ols" && "$_REPO_MODE_USED" != "vault" ]]; then
+  util_log_info "--- Phase 5c: Official Repo (last resort) ---"
+  _LAST_CMD="${GUEST_REPO_BASELINE_UPDATE_COMMAND:-apt-get update}"
+  _LAST_EXIT=0
+  _LAST_OUT="$(_gssh "DEBIAN_FRONTEND=noninteractive $_LAST_CMD" 2>&1)" || _LAST_EXIT=$?
+  while IFS= read -r _line; do util_log_info "  [official-lr] $_line"; done <<< "$_LAST_OUT"
+
+  if [[ $_LAST_EXIT -eq 0 ]]; then
+    util_log_info "  official repo OK (last resort) -> continuing"
+    _REPO_MODE_USED="official-fallback"
+    _REPO_MODE_REASON="ols_and_vault_failed_official_ok"
+  else
+    util_log_warn "  ALL repo modes failed: official + OLS + vault"
+    _REPO_MODE_USED="failed"
+    _REPO_MODE_REASON="all_repos_failed"
+    _fail "all repo modes exhausted (official + OLS + vault all failed)"
+  fi
+fi
+
+util_log_info "  repo_mode_used=$_REPO_MODE_USED reason=$_REPO_MODE_REASON"
+_STEPS+=("repo-selection")
 
 # --- PHASE 6: Update / Upgrade -----------------------------------------------
 util_log_info "--- Phase 6: Update / Upgrade ---"
@@ -352,6 +455,13 @@ STATE_JSON="{
   \"ols_used\": ${_OLS_USED},
   \"ols_skipped\": ${_OLS_SKIPPED},
   \"reboot_done\": ${_REBOOT_DONE},
+  \"repo_mode_used\": \"${_REPO_MODE_USED}\",
+  \"repo_mode_reason\": \"${_REPO_MODE_REASON}\",
+  \"official_degraded\": ${_OFFICIAL_DEGRADED},
+  \"ols_attempted\": ${_OLS_ATTEMPTED},
+  \"ols_reachable\": ${_OLS_REACHABLE},
+  \"vault_attempted\": ${_VAULT_ATTEMPTED},
+  \"vault_reachable\": ${_VAULT_REACHABLE},
   \"steps_completed\": [${_STEPS_JSON}],
   \"status\": \"ok\",
   \"configured_at\": \"${CONFIGURED_AT}\"
