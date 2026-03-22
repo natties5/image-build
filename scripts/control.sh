@@ -16,6 +16,34 @@ source "${SCRIPT_DIR}/../lib/core_paths.sh"
 source "${LIB_DIR}/common_utils.sh"
 source "${LIB_DIR}/openstack_api.sh"
 
+# ─── Windows: auto-add Python Scripts to PATH ─────────────────────────────────
+# Needed so `openstack` and `python3` resolve correctly in Git Bash on Windows.
+_setup_windows_python_path() {
+  # Already have both? nothing to do
+  if command -v openstack >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
+    return 0
+  fi
+  # Find newest Python install under AppData/Local/Programs/Python
+  local py_scripts_dir=""
+  local candidate
+  for candidate in \
+    /c/Users/"$(whoami)"/AppData/Local/Programs/Python/Python3*/Scripts \
+    /c/Users/"$(whoami)"/AppData/Local/Programs/Python/Python*/Scripts; do
+    # glob expands — pick the last (newest) match that actually has openstack
+    if [[ -f "${candidate}/openstack.exe" ]] || [[ -f "${candidate}/openstack" ]]; then
+      py_scripts_dir="$candidate"
+    fi
+  done
+  if [[ -n "$py_scripts_dir" ]]; then
+    export PATH="${py_scripts_dir}:${PATH}"
+    # Also set PYTHON3 var so pick helpers can call it directly
+    local py_dir
+    py_dir="$(dirname "$py_scripts_dir")"
+    export PYTHON3="${py_dir}/python.exe"
+  fi
+}
+_setup_windows_python_path
+
 # ─── Help ─────────────────────────────────────────────────────────────────────
 show_help() {
   cat <<'EOF'
@@ -268,16 +296,27 @@ _settings_select_resources() {
   _os_pick_item() {
     local json="$1"; shift
     local keys=("$@")
-    # Use python3/python for JSON parsing if available
-    local py_cmd=""
-    command -v python3 >/dev/null 2>&1 && py_cmd="python3"
-    command -v python  >/dev/null 2>&1 && [[ -z "$py_cmd" ]] && py_cmd="python"
+    # Resolve Python: prefer PYTHON3 env (set by _setup_windows_python_path),
+    # then python3, then python — skip Windows Store stubs (they exit 9009)
+    local py_cmd="${PYTHON3:-}"
     if [[ -z "$py_cmd" ]]; then
-      echo "  ERROR: python3/python required for JSON parsing." >&2; return 1
+      local _c
+      for _c in python3 python; do
+        if command -v "$_c" >/dev/null 2>&1; then
+          # Skip Windows App Execution Alias stubs
+          if "$_c" --version >/dev/null 2>&1; then
+            py_cmd="$_c"; break
+          fi
+        fi
+      done
+    fi
+    if [[ -z "$py_cmd" ]]; then
+      echo "  ERROR: python3/python not found. Install python-openstackclient first." >&2; return 1
     fi
     local items
-    items=$($py_cmd - "$json" "${keys[@]}" <<'PYEOF'
-import sys, json
+    items=$(PYTHONUTF8=1 PYTHONIOENCODING=utf-8 $py_cmd - "$json" "${keys[@]}" <<'PYEOF'
+import sys, json, io
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 data = json.loads(sys.argv[1])
 keys = sys.argv[2:]
 for item in data:
@@ -418,9 +457,10 @@ PYEOF
   local ext_choice
   # Show list then read
   local ext_lines=()
-  if command -v python3 >/dev/null 2>&1 || command -v python >/dev/null 2>&1; then
-    local py_cmd2=""
-    command -v python3 >/dev/null 2>&1 && py_cmd2="python3" || py_cmd2="python"
+  local py_cmd2="${PYTHON3:-}"
+  [[ -z "$py_cmd2" ]] && command -v python3 >/dev/null 2>&1 && python3 --version >/dev/null 2>&1 && py_cmd2="python3"
+  [[ -z "$py_cmd2" ]] && command -v python  >/dev/null 2>&1 && python  --version >/dev/null 2>&1 && py_cmd2="python"
+  if [[ -n "$py_cmd2" ]]; then
     local ext_items
     ext_items=$($py_cmd2 - "$extnet_json" "Name" "ID" <<'PYEOF2'
 import sys, json
@@ -822,8 +862,13 @@ _autoload_profile() {
   source "$profile_file" 2>/dev/null || return 0
   local openrc_path="${ACTIVE_OPENRC:-}"
   [[ -n "$openrc_path" && -f "$openrc_path" ]] || return 0
+  unset OS_INSECURE OPENSTACK_INSECURE 2>/dev/null || true
   # shellcheck disable=SC1090
   source "$openrc_path" 2>/dev/null || return 0
+  # Fix OS_CACERT Linux path on Windows
+  if [[ -n "${OS_CACERT:-}" && ! -f "${OS_CACERT}" ]]; then
+    unset OS_CACERT
+  fi
   echo "  [auto-loaded profile: ${ACTIVE_OPENRC_NAME:-$(basename "$openrc_path")}]"
 }
 
