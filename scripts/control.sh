@@ -157,6 +157,8 @@ _settings_load_openrc() {
   fi
 
   # Step B: source the selected file
+  # Reset insecure state before loading new profile
+  unset OS_INSECURE OPENSTACK_INSECURE 2>/dev/null || true
   # shellcheck disable=SC1090
   if ! source "$selected_openrc" 2>/tmp/openrc_source_err; then
     echo "  ERROR: Failed to source $(basename "$selected_openrc")"
