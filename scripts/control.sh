@@ -371,19 +371,39 @@ PYEOF
     proj_id=$(echo "$proj_line" | cut -f2)
     env_out+="OS_PROJECT_NAME=\"${proj_name}\"\n"
     env_out+="OS_PROJECT_ID=\"${proj_id}\"\n"
+    # Export immediately so steps 2b-2f can use --project filter
+    export OS_PROJECT_ID="$proj_id"
+    export OS_PROJECT_NAME="$proj_name"
     echo "  Selected project: ${proj_name} (${proj_id})"
   else
     echo "  Skipping project selection."
   fi
 
-  # 2b) Select Network
+  # 2b) Select Network (project-scoped + external/shared, deduplicated by ID)
   echo ""
   echo "  Fetching networks..."
-  local net_json
-  net_json=$(openstack_cmd network list -f json 2>/dev/null) || net_json="[]"
+  local net_project_json net_external_json net_merged_json
+  net_project_json=$(openstack_cmd network list \
+    --project "${OS_PROJECT_ID:-}" -f json 2>/dev/null) || net_project_json="[]"
+  net_external_json=$(openstack_cmd network list \
+    --external -f json 2>/dev/null) || net_external_json="[]"
+  net_merged_json=$(python3 - "$net_project_json" "$net_external_json" <<'PYEOF_NET'
+import sys, json
+a = json.loads(sys.argv[1])
+b = json.loads(sys.argv[2])
+seen = set()
+merged = []
+for item in a + b:
+    nid = item.get("ID") or item.get("id") or ""
+    if nid not in seen:
+        seen.add(nid)
+        merged.append(item)
+print(json.dumps(merged))
+PYEOF_NET
+  ) || net_merged_json="$net_project_json"
   echo "  Select Network (name | id | status):"
   local net_line
-  if net_line=$(_os_pick_item "$net_json" "Name" "ID" "Status"); then
+  if net_line=$(_os_pick_item "$net_merged_json" "Name" "ID" "Status"); then
     local net_name net_id
     net_name=$(echo "$net_line" | cut -f1)
     net_id=$(echo "$net_line" | cut -f2)
@@ -414,27 +434,57 @@ PYEOF
     echo "  Skipping flavor selection."
   fi
 
-  # 2d) Select Volume Type
+  # 2d) Select Volume Type (two-attempt + manual fallback)
   echo ""
   echo "  Fetching volume types..."
-  local voltype_json
-  voltype_json=$(openstack_cmd volume type list -f json 2>/dev/null) || voltype_json="[]"
+  local voltype_json=""
+  # Attempt 1: with project scope
+  voltype_json=$(openstack_cmd volume type list \
+    --os-project-id "${OS_PROJECT_ID:-}" -f json 2>/dev/null) || voltype_json="[]"
+  local voltype_count=0
+  voltype_count=$(python3 -c 'import sys,json; print(len(json.load(sys.stdin)))' \
+    <<< "$voltype_json" 2>/dev/null) || voltype_count=0
+  # Attempt 2: without scope if attempt 1 returned empty
+  if [[ "$voltype_count" == "0" ]]; then
+    voltype_json=$(openstack_cmd volume type list -f json 2>/dev/null) || voltype_json="[]"
+    voltype_count=$(python3 -c 'import sys,json; print(len(json.load(sys.stdin)))' \
+      <<< "$voltype_json" 2>/dev/null) || voltype_count=0
+  fi
   echo "  Select Volume Type (name | id):"
-  local voltype_line
-  if voltype_line=$(_os_pick_item "$voltype_json" "Name" "ID"); then
+  local voltype_line=""
+  if [[ "$voltype_count" -gt 0 ]] && voltype_line=$(_os_pick_item "$voltype_json" "Name" "ID"); then
     local voltype_name
     voltype_name=$(echo "$voltype_line" | cut -f1)
     env_out+="VOLUME_TYPE=\"${voltype_name}\"\n"
     echo "  Selected volume type: ${voltype_name}"
   else
-    echo "  Skipping volume type selection."
+    # Attempt 3: manual text input
+    echo "  Volume type list unavailable. Enter volume type name manually,"
+    echo "  or press Enter to skip:"
+    echo -n "  Volume type: "
+    local manual_voltype=""
+    read -r manual_voltype || manual_voltype=""
+    if [[ -n "$manual_voltype" ]]; then
+      env_out+="VOLUME_TYPE=\"${manual_voltype}\"\n"
+      echo "  Volume type set to: ${manual_voltype}"
+    else
+      echo "  Skipping volume type."
+    fi
   fi
 
-  # 2e) Select Security Group
+  # 2e) Select Security Group (project-scoped with unscoped fallback)
   echo ""
   echo "  Fetching security groups..."
   local sg_json
-  sg_json=$(openstack_cmd security group list -f json 2>/dev/null) || sg_json="[]"
+  sg_json=$(openstack_cmd security group list \
+    --project "${OS_PROJECT_ID:-}" -f json 2>/dev/null) || sg_json="[]"
+  # Fallback to unscoped if project-scoped returned empty
+  local sg_count=0
+  sg_count=$(python3 -c 'import sys,json; print(len(json.load(sys.stdin)))' \
+    <<< "$sg_json" 2>/dev/null) || sg_count=0
+  if [[ "$sg_count" == "0" ]]; then
+    sg_json=$(openstack_cmd security group list -f json 2>/dev/null) || sg_json="[]"
+  fi
   echo "  Select Security Group (name | description):"
   local sg_line
   if sg_line=$(_os_pick_item "$sg_json" "Name" "Description"); then
@@ -516,6 +566,9 @@ PYEOF2
 # OPTION 3 — Show Current Settings (read-only summary)
 # ──────────────────────────────────────────────────────────────────────────────
 _settings_show() {
+  # Guard: prevent recursive/duplicate calls (e.g. from sourced session files)
+  [[ "${_SETTINGS_SHOW_ACTIVE:-0}" == "1" ]] && return 0
+  _SETTINGS_SHOW_ACTIVE=1
   echo ""
   echo "  ╔══════════════════════════════════════╗"
   echo "  ║       Current Settings Summary       ║"
@@ -580,6 +633,7 @@ _settings_show() {
   printf "  %-16s: %s\n" "guest-access"   "$( [[ -f "$GUEST_ACCESS_ENV" ]]   && echo "$_exists" || echo "$_missing" )"
   printf "  %-16s: %s\n" "active-profile" "$( [[ -f "$profile_file" ]]       && echo "$_exists" || echo "$_missing" )"
   echo ""
+  _SETTINGS_SHOW_ACTIVE=0
 }
 
 # Legacy aliases used by dispatch
