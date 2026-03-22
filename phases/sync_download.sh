@@ -376,10 +376,11 @@ download_image() {
          --tries=3 \
          --progress=dot:giga \
          -O "$dest_path" \
-         "$url" 2>&1 | while IFS= read -r line; do util_log_info "  $line"; done
+         "$url" >/dev/null
   elif command -v curl >/dev/null 2>&1; then
     curl -L --continue-at - --max-time 3600 --retry 2 \
-         -o "$dest_path" "$url" 2>&1 | while IFS= read -r line; do util_log_info "  $line"; done
+         --progress-bar \
+         -o "$dest_path" "$url" >/dev/null
   else
     util_die "Neither wget nor curl is available"
   fi
