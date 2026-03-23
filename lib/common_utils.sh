@@ -402,6 +402,11 @@ _sync_discover_upstream_versions() {
         if printf '%s\n%s\n' "$MIN_VERSION" "$ver" \
             | sort -V | tail -1 | grep -q "^${ver}$" || \
            [[ "$ver" == "$MIN_VERSION" ]]; then
+          # Verify cloud images exist for this codename
+          local check_url="https://cloud.debian.org/images/cloud/${codename}/latest/"
+          local http_code
+          http_code=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" "$check_url" 2>/dev/null)
+          [[ "$http_code" == "200" ]] || continue
           versions+=("$ver")
         fi
       done < <(echo "$html" \
@@ -461,6 +466,11 @@ _sync_discover_upstream_versions() {
         if printf '%s\n%s\n' "$MIN_VERSION" "$ver" \
             | sort -V | tail -1 | grep -q "^${ver}$" || \
            [[ "$ver" == "$MIN_VERSION" ]]; then
+          # Only include versions that exist in archives (sync_download.sh uses archive URL)
+          local arch_check="https://archives.fedoraproject.org/pub/archive/fedora/linux/releases/${ver}/Cloud/x86_64/images/"
+          local http_code
+          http_code=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" "$arch_check" 2>/dev/null)
+          [[ "$http_code" == "200" ]] || continue
           versions+=("$ver")
         fi
       done < <(echo "$html" \
