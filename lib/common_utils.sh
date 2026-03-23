@@ -367,7 +367,12 @@ _sync_discover_upstream_versions() {
         [[ -z "$ver" ]] && continue
         # LTS filter: xx.04 only
         if [[ "${LTS_ONLY:-0}" == "1" ]]; then
+          # Must be xx.04 format
           [[ "$ver" =~ ^[0-9]+\.04$ ]] || continue
+          # Must be even year (LTS = even year only: 20.04 22.04 24.04 26.04)
+          local year
+          year=$(echo "$ver" | cut -d. -f1)
+          [[ $(( year % 2 )) -eq 0 ]] || continue
         fi
         # MIN_VERSION filter
         if printf '%s\n%s\n' "$MIN_VERSION" "$ver" \
@@ -466,11 +471,13 @@ _sync_discover_upstream_versions() {
         if printf '%s\n%s\n' "$MIN_VERSION" "$ver" \
             | sort -V | tail -1 | grep -q "^${ver}$" || \
            [[ "$ver" == "$MIN_VERSION" ]]; then
-          # Only include versions that exist in archives (sync_download.sh uses archive URL)
-          local arch_check="https://archives.fedoraproject.org/pub/archive/fedora/linux/releases/${ver}/Cloud/x86_64/images/"
-          local http_code
-          http_code=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" "$arch_check" 2>/dev/null)
-          [[ "$http_code" == "200" ]] || continue
+          # Verify CHECKSUM file exists in archives (sync_download.sh uses archive URL)
+          local fed_archive_url="https://archives.fedoraproject.org/pub/archive/fedora/linux/releases/${ver}/Cloud/x86_64/images/"
+          local fed_arch_html
+          fed_arch_html=$(curl -s --max-time 10 "$fed_archive_url" 2>/dev/null) || fed_arch_html=""
+          if ! echo "$fed_arch_html" | grep -qE 'Fedora-Cloud-[0-9]+-[0-9.]+-x86_64-CHECKSUM'; then
+            continue  # skip — not in archives yet or no CHECKSUM found
+          fi
           versions+=("$ver")
         fi
       done < <(echo "$html" \
