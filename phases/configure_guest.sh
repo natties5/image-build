@@ -375,7 +375,20 @@ _STEPS+=("packages")
 if [[ "${GUEST_REBOOT_AFTER_UPGRADE:-0}" == "1" ]]; then
   util_log_info "--- Phase 8: Reboot ---"
   _gssh "shutdown -r now || reboot || true" 2>/dev/null || true
-  sleep 15
+  sleep 5
+  # Step 1: wait for SSH to go DOWN (confirm reboot actually started)
+  util_log_info "  Waiting for SSH to go DOWN (reboot confirmation, timeout 120s)..."
+  _DOWN_ELAPSED=0
+  while [[ $_DOWN_ELAPSED -lt 120 ]]; do
+    sleep 10
+    _DOWN_ELAPSED=$(( _DOWN_ELAPSED + 10 ))
+    if ! ssh_run "$GUEST_IP" "$_G_PORT" "$_G_USER" "$_G_AUTH_MODE" "$_G_AUTH_VAL" "true" >/dev/null 2>&1; then
+      util_log_info "  SSH is DOWN after ${_DOWN_ELAPSED}s — reboot confirmed"
+      break
+    fi
+    util_log_info "  waiting for SSH to go down... elapsed=${_DOWN_ELAPSED}s"
+  done
+  # Step 2: wait for SSH to come back UP
   _REBOOT_TIMEOUT="${GUEST_REBOOT_TIMEOUT_SEC:-1800}"
   _REBOOT_INTERVAL=15
   _ELAPSED=0
@@ -442,7 +455,7 @@ _PUBKEY="${GUEST_SSH_PUBKEY_AUTHENTICATION:-yes}"
 _KBDINT="${GUEST_SSH_KBD_INTERACTIVE_AUTHENTICATION:-no}"
 _SSH_SVC="${GUEST_SSH_SERVICE:-ssh}"
 _SSH_POL_EXIT=0
-_SSH_POL_OUT="$(_gssh "mkdir -p \$(dirname $_SSHD_DROPIN); printf 'PermitRootLogin $_PERMIT\nPasswordAuthentication $_PASSAUTH\nPubkeyAuthentication $_PUBKEY\nKbdInteractiveAuthentication $_KBDINT\n' > $_SSHD_DROPIN; systemctl restart $_SSH_SVC 2>/dev/null || true; echo sshd-policy-ok" 2>&1)" || _SSH_POL_EXIT=$?
+_SSH_POL_OUT="$(_gssh "mkdir -p \$(dirname $_SSHD_DROPIN); printf 'PermitRootLogin $_PERMIT\nPasswordAuthentication $_PASSAUTH\nPubkeyAuthentication $_PUBKEY\nKbdInteractiveAuthentication $_KBDINT\nUsePAM yes\n' > $_SSHD_DROPIN; if sshd -t 2>/dev/null; then systemctl restart $_SSH_SVC 2>/dev/null || true; echo sshd-policy-ok; else echo sshd-config-invalid-dropin-removed; rm -f $_SSHD_DROPIN; fi" 2>&1)" || _SSH_POL_EXIT=$?
 util_log_info "  [ssh-policy] $_SSH_POL_OUT (exit=${_SSH_POL_EXIT})"
 _STEPS+=("ssh-policy")
 
