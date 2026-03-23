@@ -337,3 +337,197 @@ _build_all_ready_versions() {
   _build_list_ready | awk -v o="$os" '$1==o && $3=="ready" {print $2}' \
     | sort -V
 }
+
+# Discover available versions from upstream for a given OS.
+# Reads AUTO_DISCOVER, MIN_VERSION, LTS_ONLY from sync.env.
+# Returns newline-separated list of versions found >= MIN_VERSION.
+# Usage: _sync_discover_upstream_versions <os>
+_sync_discover_upstream_versions() {
+  local os="$1"
+  local cfg="${OS_CONFIG_DIR}/${os}/sync.env"
+  [[ -f "$cfg" ]] || return 1
+
+  # Load needed vars from sync.env
+  local AUTO_DISCOVER="" MIN_VERSION="" LTS_ONLY="" INDEX_URL_TEMPLATE=""
+  # shellcheck source=/dev/null
+  source "$cfg" 2>/dev/null || return 1
+
+  [[ "${AUTO_DISCOVER:-0}" == "1" ]] || return 0
+
+  local base_url versions=()
+
+  case "$os" in
+    ubuntu)
+      # Scan https://cloud-images.ubuntu.com/releases/
+      base_url="https://cloud-images.ubuntu.com/releases/"
+      local html
+      html=$(curl -s --max-time 15 "$base_url" 2>/dev/null) || return 1
+      # Extract version-like folders: 18.04/ 20.04/ 22.04/ 24.04/ 24.10/
+      while IFS= read -r ver; do
+        [[ -z "$ver" ]] && continue
+        # LTS filter: xx.04 only
+        if [[ "${LTS_ONLY:-0}" == "1" ]]; then
+          [[ "$ver" =~ ^[0-9]+\.04$ ]] || continue
+        fi
+        # MIN_VERSION filter
+        if printf '%s\n%s\n' "$MIN_VERSION" "$ver" \
+            | sort -V | tail -1 | grep -q "^${ver}$" || \
+           [[ "$ver" == "$MIN_VERSION" ]]; then
+          versions+=("$ver")
+        fi
+      done < <(echo "$html" \
+        | grep -oE 'href="[0-9]+\.[0-9]+/?[0-9]*/?[0-9]*/"' \
+        | sed 's|href="||;s|/\?"||;s|/"||' \
+        | sort -uV)
+      ;;
+
+    debian)
+      # Scan https://cloud.debian.org/images/cloud/
+      base_url="https://cloud.debian.org/images/cloud/"
+      local html
+      html=$(curl -s --max-time 15 "$base_url" 2>/dev/null) || return 1
+      # Codename → version map (extend as new releases come)
+      declare -A codename_to_ver=(
+        [bookworm]=12
+        [trixie]=13
+        [forky]=14
+        [sid]=999
+      )
+      while IFS= read -r codename; do
+        [[ -z "$codename" ]] && continue
+        [[ "$codename" == "sid" ]] && continue  # skip unstable
+        local ver="${codename_to_ver[$codename]:-}"
+        [[ -z "$ver" ]] && continue
+        # MIN_VERSION filter
+        if printf '%s\n%s\n' "$MIN_VERSION" "$ver" \
+            | sort -V | tail -1 | grep -q "^${ver}$" || \
+           [[ "$ver" == "$MIN_VERSION" ]]; then
+          versions+=("$ver")
+        fi
+      done < <(echo "$html" \
+        | grep -oE 'href="[a-z]+/"' \
+        | sed 's|href="||;s|/"||' \
+        | grep -vE '^(daily|archive|cdimage|OpenStack|[0-9])' \
+        | sort -u)
+      ;;
+
+    rocky)
+      # Scan https://dl.rockylinux.org/pub/rocky/
+      base_url="https://dl.rockylinux.org/pub/rocky/"
+      local html
+      html=$(curl -s --max-time 15 "$base_url" 2>/dev/null) || return 1
+      while IFS= read -r ver; do
+        [[ -z "$ver" ]] && continue
+        # Only major versions (8, 9, 10) not sub-paths
+        [[ "$ver" =~ ^[0-9]+$ ]] || continue
+        if printf '%s\n%s\n' "$MIN_VERSION" "$ver" \
+            | sort -V | tail -1 | grep -q "^${ver}$" || \
+           [[ "$ver" == "$MIN_VERSION" ]]; then
+          versions+=("$ver")
+        fi
+      done < <(echo "$html" \
+        | grep -oE 'href="[0-9]+/"' \
+        | sed 's|href="||;s|/"||' \
+        | sort -uV)
+      ;;
+
+    almalinux)
+      # Scan https://repo.almalinux.org/almalinux/
+      base_url="https://repo.almalinux.org/almalinux/"
+      local html
+      html=$(curl -s --max-time 15 "$base_url" 2>/dev/null) || return 1
+      while IFS= read -r ver; do
+        [[ -z "$ver" ]] && continue
+        [[ "$ver" =~ ^[0-9]+$ ]] || continue
+        if printf '%s\n%s\n' "$MIN_VERSION" "$ver" \
+            | sort -V | tail -1 | grep -q "^${ver}$" || \
+           [[ "$ver" == "$MIN_VERSION" ]]; then
+          versions+=("$ver")
+        fi
+      done < <(echo "$html" \
+        | grep -oE 'href="[0-9]+/"' \
+        | sed 's|href="||;s|/"||' \
+        | sort -uV)
+      ;;
+
+    fedora)
+      # Scan https://dl.fedoraproject.org/pub/fedora/linux/releases/
+      base_url="https://dl.fedoraproject.org/pub/fedora/linux/releases/"
+      local html
+      html=$(curl -s --max-time 15 "$base_url" 2>/dev/null) || return 1
+      while IFS= read -r ver; do
+        [[ -z "$ver" ]] && continue
+        [[ "$ver" =~ ^[0-9]+$ ]] || continue
+        if printf '%s\n%s\n' "$MIN_VERSION" "$ver" \
+            | sort -V | tail -1 | grep -q "^${ver}$" || \
+           [[ "$ver" == "$MIN_VERSION" ]]; then
+          versions+=("$ver")
+        fi
+      done < <(echo "$html" \
+        | grep -oE 'href="[0-9]+/"' \
+        | sed 's|href="||;s|/"||' \
+        | sort -uV)
+      ;;
+
+    *)
+      return 1
+      ;;
+  esac
+
+  printf '%s\n' "${versions[@]}" | sort -uV
+}
+
+# Compare discovered versions vs TRACKED_VERSIONS in sync.env.
+# If new versions found → update TRACKED_VERSIONS in sync.env.
+# Returns: lines of "VERSION [NEW]" or "VERSION [tracked]"
+# Usage: _sync_update_tracked_versions <os>
+_sync_update_tracked_versions() {
+  local os="$1"
+  local cfg="${OS_CONFIG_DIR}/${os}/sync.env"
+  [[ -f "$cfg" ]] || return 1
+
+  # Read current TRACKED_VERSIONS
+  local current_tracked
+  current_tracked=$(grep '^TRACKED_VERSIONS=' "$cfg" 2>/dev/null \
+    | cut -d= -f2- | tr -d '"') || current_tracked=""
+
+  # Discover upstream
+  local discovered
+  discovered=$(_sync_discover_upstream_versions "$os") || discovered=""
+
+  if [[ -z "$discovered" ]]; then
+    echo "  (discovery failed or AUTO_DISCOVER=0)" >&2
+    return 0
+  fi
+
+  local new_versions=()
+  local ver
+  while IFS= read -r ver; do
+    [[ -z "$ver" ]] && continue
+    # Check if already in TRACKED_VERSIONS
+    if ! echo " $current_tracked " | grep -q " $ver "; then
+      new_versions+=("$ver")
+    fi
+  done <<< "$discovered"
+
+  # Print all discovered with [NEW] or [tracked] tag
+  while IFS= read -r ver; do
+    [[ -z "$ver" ]] && continue
+    if echo " $current_tracked " | grep -q " $ver "; then
+      echo "${ver} [tracked]"
+    else
+      echo "${ver} [NEW]"
+    fi
+  done <<< "$discovered"
+
+  # If new versions found → update TRACKED_VERSIONS in sync.env
+  if [[ ${#new_versions[@]} -gt 0 ]]; then
+    # Build new TRACKED_VERSIONS = current + new, sorted
+    local all_versions
+    all_versions=$(printf '%s\n' $current_tracked "${new_versions[@]}" \
+      | sort -uV | tr '\n' ' ' | sed 's/ $//')
+    # Update sync.env in-place
+    sed -i "s|^TRACKED_VERSIONS=.*|TRACKED_VERSIONS=\"${all_versions}\"|" "$cfg"
+    echo "  [auto-discover] updated TRACKED_VERSIONS for $os: $all_versions" >&2
+  fi
+}

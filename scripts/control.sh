@@ -1145,6 +1145,18 @@ menu_sync() {
 _menu_sync_all_dry_run() {
   local os
   for os in ubuntu debian fedora almalinux rocky; do
+    echo "  --- discovering: $os ---"
+    local disc_out
+    disc_out=$(_sync_update_tracked_versions "$os" 2>/dev/null) || disc_out=""
+    if [[ -n "$disc_out" ]]; then
+      while IFS= read -r line; do
+        echo "    $line"
+      done <<< "$disc_out"
+    fi
+  done
+  echo ""
+  echo "  --- running dry-run for all OS ---"
+  for os in ubuntu debian fedora almalinux rocky; do
     echo "  --- dry-run: $os ---"
     bash "${PHASES_DIR}/sync_download.sh" --os "$os" --dry-run || true
   done
@@ -1153,6 +1165,16 @@ _menu_sync_all_dry_run() {
 _menu_sync_os_dry_run() {
   local os
   os=$(_sync_select_os) || return
+  echo "  Discovering upstream versions for $os..."
+  local disc_out
+  disc_out=$(_sync_update_tracked_versions "$os" 2>/dev/null) || disc_out=""
+  if [[ -n "$disc_out" ]]; then
+    echo "  Available versions upstream:"
+    while IFS= read -r line; do
+      echo "    $line"
+    done <<< "$disc_out"
+  fi
+  echo ""
   bash "${PHASES_DIR}/sync_download.sh" --os "$os" --dry-run
 }
 
