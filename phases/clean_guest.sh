@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# phases/clean_guest.sh � Full guest OS clean phase driven by GUEST_* config vars.
+# phases/clean_guest.sh � Full guest OS clean phase driven by GUEST_* config vars.
 # Usage: bash phases/clean_guest.sh --os <name> --version <ver>
 set -Eeuo pipefail
 
@@ -143,6 +143,38 @@ if [[ "${GUEST_FSTRIM_BEFORE_SHUTDOWN:-0}" == "1" ]]; then
   _FT_OUT="$(_gssh "fstrim -av 2>/dev/null || true" 2>&1)" || true
   while IFS= read -r _line; do util_log_info "  [fstrim] $_line"; done <<< "$_FT_OUT"
 fi
+
+# ── Restore official repo before capture ──────────────────────────────
+util_log_info "Restoring official repo before poweroff..."
+_BACKUP_DIR="${GUEST_REPO_BACKUP_DIR:-/var/backups/image-build/repos}"
+_REPO_DRIVER="${GUEST_REPO_DRIVER:-apt}"
+
+if [[ "$_REPO_DRIVER" == "dnf-repo" ]]; then
+  _RESTORE_OUT="$(_gssh "
+    if ls ${_BACKUP_DIR}/*.repo 2>/dev/null | head -1 | grep -q .; then
+      cp ${_BACKUP_DIR}/*.repo /etc/yum.repos.d/ 2>/dev/null || true
+      dnf clean all 2>/dev/null || true
+      echo repo-restored-ok
+    else
+      echo repo-backup-not-found-skipping
+    fi
+  " 2>&1)" || _RESTORE_OUT="restore-ssh-fail"
+  util_log_info "  [repo-restore] $_RESTORE_OUT"
+else
+  _RESTORE_OUT="$(_gssh "
+    if ls ${_BACKUP_DIR}/ 2>/dev/null | grep -qE '\.(list|sources)'; then
+      cp ${_BACKUP_DIR}/*.list /etc/apt/sources.list.d/ 2>/dev/null || true
+      cp ${_BACKUP_DIR}/*.sources /etc/apt/sources.list.d/ 2>/dev/null || true
+      cp ${_BACKUP_DIR}/sources.list /etc/apt/ 2>/dev/null || true
+      apt-get clean 2>/dev/null || true
+      echo repo-restored-ok
+    else
+      echo repo-backup-not-found-skipping
+    fi
+  " 2>&1)" || _RESTORE_OUT="restore-ssh-fail"
+  util_log_info "  [repo-restore] $_RESTORE_OUT"
+fi
+# ──────────────────────────────────────────────────────────────────────
 
 # --- Final shutdown -----------------------------------------------------------
 # Poweroff via OpenStack API (not SSH)

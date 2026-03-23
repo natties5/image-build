@@ -147,7 +147,11 @@ fi
 
 # --- PHASE 3: Baseline Official Repo Test ------------------------------------
 util_log_info "--- Phase 3: Baseline Repo Test ---"
-_BL_CMD="${GUEST_REPO_BASELINE_UPDATE_COMMAND:-apt-get update}"
+if [[ "${GUEST_REPO_DRIVER:-apt}" == "dnf-repo" ]]; then
+  _BL_CMD="${GUEST_REPO_BASELINE_UPDATE_COMMAND:-dnf clean all && dnf -y makecache}"
+else
+  _BL_CMD="${GUEST_REPO_BASELINE_UPDATE_COMMAND:-apt-get update}"
+fi
 _BL_EXIT=0
 _BL_OUT="$(_gssh "DEBIAN_FRONTEND=noninteractive $_BL_CMD" 2>&1)" || _BL_EXIT=$?
 while IFS= read -r _line; do util_log_info "  [baseline] $_line"; done <<< "$_BL_OUT"
@@ -261,7 +265,11 @@ if [[ "${GUEST_ENABLE_VAULT_FALLBACK:-0}" == "1" ]] && \
       util_log_info "  [vault-inject] $_VINJ_OUT"
 
       # Validate vault
-      _VVAL_CMD="${GUEST_VAULT_VALIDATION_COMMAND:-${GUEST_REPO_VALIDATION_COMMAND:-apt-get clean && apt-get update}}"
+      if [[ "${GUEST_REPO_DRIVER:-apt}" == "dnf-repo" ]]; then
+    _VVAL_CMD="${GUEST_VAULT_VALIDATION_COMMAND:-${GUEST_REPO_VALIDATION_COMMAND:-dnf clean all && dnf -y makecache}}"
+  else
+    _VVAL_CMD="${GUEST_VAULT_VALIDATION_COMMAND:-${GUEST_REPO_VALIDATION_COMMAND:-apt-get clean && apt-get update}}"
+  fi
       _VVAL_EXIT=0
       _VVAL_OUT="$(_gssh "DEBIAN_FRONTEND=noninteractive $_VVAL_CMD" 2>&1)" || _VVAL_EXIT=$?
       while IFS= read -r _line; do util_log_info "  [vault-val] $_line"; done <<< "$_VVAL_OUT"
@@ -296,7 +304,11 @@ fi
 # -- Official last resort (if OLS + vault both failed) ------------------------
 if [[ "$_REPO_MODE_USED" != "ols" && "$_REPO_MODE_USED" != "vault" ]]; then
   util_log_info "--- Phase 5c: Official Repo (last resort) ---"
-  _LAST_CMD="${GUEST_REPO_BASELINE_UPDATE_COMMAND:-apt-get update}"
+  if [[ "${GUEST_REPO_DRIVER:-apt}" == "dnf-repo" ]]; then
+    _LAST_CMD="${GUEST_REPO_BASELINE_UPDATE_COMMAND:-dnf clean all && dnf -y makecache}"
+  else
+    _LAST_CMD="${GUEST_REPO_BASELINE_UPDATE_COMMAND:-apt-get update}"
+  fi
   _LAST_EXIT=0
   _LAST_OUT="$(_gssh "DEBIAN_FRONTEND=noninteractive $_LAST_CMD" 2>&1)" || _LAST_EXIT=$?
   while IFS= read -r _line; do util_log_info "  [official-lr] $_line"; done <<< "$_LAST_OUT"
@@ -319,7 +331,11 @@ _STEPS+=("repo-selection")
 # --- PHASE 6: Update / Upgrade -----------------------------------------------
 util_log_info "--- Phase 6: Update / Upgrade ---"
 if [[ "${GUEST_RUN_BASELINE_UPDATE:-0}" == "1" ]]; then
-  _UPD_CMD="${GUEST_UPDATE_COMMAND:-apt-get update}"
+  if [[ "${GUEST_REPO_DRIVER:-apt}" == "dnf-repo" ]]; then
+    _UPD_CMD="${GUEST_UPDATE_COMMAND:-dnf clean all && dnf -y makecache}"
+  else
+    _UPD_CMD="${GUEST_UPDATE_COMMAND:-apt-get update}"
+  fi
   _UPD_EXIT=0
   _UPD_OUT="$(_gssh "DEBIAN_FRONTEND=noninteractive $_UPD_CMD" 2>&1)" || _UPD_EXIT=$?
   while IFS= read -r _line; do util_log_info "  [update] $_line"; done <<< "$_UPD_OUT"
@@ -328,7 +344,11 @@ if [[ "${GUEST_RUN_BASELINE_UPDATE:-0}" == "1" ]]; then
   _STEPS+=("update")
 fi
 if [[ "${GUEST_RUN_FULL_UPGRADE:-0}" == "1" ]]; then
-  _UPG_CMD="${GUEST_UPGRADE_COMMAND:-DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade -y}"
+  if [[ "${GUEST_REPO_DRIVER:-apt}" == "dnf-repo" ]]; then
+    _UPG_CMD="${GUEST_UPGRADE_COMMAND:-dnf -y upgrade --nobest}"
+  else
+    _UPG_CMD="${GUEST_UPGRADE_COMMAND:-DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade -y}"
+  fi
   _UPG_EXIT=0
   _UPG_OUT="$(_gssh "DEBIAN_FRONTEND=noninteractive $_UPG_CMD" 2>&1)" || _UPG_EXIT=$?
   while IFS= read -r _line; do util_log_info "  [upgrade] $_line"; done <<< "$_UPG_OUT"
