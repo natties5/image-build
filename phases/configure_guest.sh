@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# phases/configure_guest.sh � Full guest OS configure phase driven by GUEST_* config vars.
+# phases/configure_guest.sh — Full guest OS configure phase driven by GUEST_* config vars.
 # Usage: bash phases/configure_guest.sh --os <name> --version <ver>
 set -Eeuo pipefail
 
@@ -107,6 +107,13 @@ _gssh() {
   ssh_run "$GUEST_IP" "$_G_PORT" "$_G_USER" "$_G_AUTH_MODE" "$_G_AUTH_VAL" "$@" 2>&1
 }
 
+_gssh_log() {
+  local _tag="$1"
+  shift
+  _gssh "$@" | while IFS= read -r _line; do util_log_info "  [$_tag] $_line"; done
+  return ${PIPESTATUS[0]}
+}
+
 _fail() {
   util_log_error "$1"
   state_mark_failed "$PHASE" "$OS_FAMILY" "$VERSION"
@@ -153,8 +160,7 @@ else
   _BL_CMD="${GUEST_REPO_BASELINE_UPDATE_COMMAND:-apt-get update}"
 fi
 _BL_EXIT=0
-_BL_OUT="$(_gssh "DEBIAN_FRONTEND=noninteractive $_BL_CMD" 2>&1)" || _BL_EXIT=$?
-while IFS= read -r _line; do util_log_info "  [baseline] $_line"; done <<< "$_BL_OUT"
+_gssh_log "baseline" "DEBIAN_FRONTEND=noninteractive $_BL_CMD" || _BL_EXIT=$?
 if [[ $_BL_EXIT -ne 0 ]]; then
   _OFFICIAL_DEGRADED=true
   _REPO_MODE_REASON="official_degraded"
@@ -205,8 +211,7 @@ if [[ "${GUEST_ENABLE_OLS_FAILOVER:-0}" == "1" ]]; then
     # Validate OLS
     _VAL_CMD="${GUEST_REPO_VALIDATION_COMMAND:-apt-get clean && apt-get update}"
     _VAL_EXIT=0
-    _VAL_OUT="$(_gssh "DEBIAN_FRONTEND=noninteractive $_VAL_CMD" 2>&1)" || _VAL_EXIT=$?
-    while IFS= read -r _line; do util_log_info "  [ols-val] $_line"; done <<< "$_VAL_OUT"
+    _gssh_log "ols-val" "DEBIAN_FRONTEND=noninteractive $_VAL_CMD" || _VAL_EXIT=$?
 
     if [[ $_VAL_EXIT -eq 0 ]]; then
       util_log_info "  OLS validation OK -> using OLS"
@@ -221,11 +226,10 @@ if [[ "${GUEST_ENABLE_OLS_FAILOVER:-0}" == "1" ]]; then
       _FAILBACK="${GUEST_REPO_FAILBACK_ACTION:-restore-backup}"
       if [[ "$_FAILBACK" == "restore-backup" ]]; then
         if [[ "${GUEST_REPO_DRIVER:-apt}" == "dnf-repo" ]]; then
-          _RB_OUT="$(_gssh "cp $_BACKUP_DIR/*.repo /etc/yum.repos.d/ 2>/dev/null || true; dnf clean all; dnf -y makecache; echo rollback-done" 2>&1)" || true
+          _gssh_log "rollback" "cp $_BACKUP_DIR/*.repo /etc/yum.repos.d/ 2>/dev/null || true; dnf clean all; dnf -y makecache; echo rollback-done" || true
         else
-          _RB_OUT="$(_gssh "cp $_BACKUP_DIR/*.list /etc/apt/sources.list.d/ 2>/dev/null || true; cp $_BACKUP_DIR/*.sources /etc/apt/sources.list.d/ 2>/dev/null || true; cp $_BACKUP_DIR/sources.list /etc/apt/ 2>/dev/null || true; DEBIAN_FRONTEND=noninteractive apt-get update; echo rollback-done" 2>&1)" || true
+          _gssh_log "rollback" "cp $_BACKUP_DIR/*.list /etc/apt/sources.list.d/ 2>/dev/null || true; cp $_BACKUP_DIR/*.sources /etc/apt/sources.list.d/ 2>/dev/null || true; cp $_BACKUP_DIR/sources.list /etc/apt/ 2>/dev/null || true; DEBIAN_FRONTEND=noninteractive apt-get update; echo rollback-done" || true
         fi
-        while IFS= read -r _line; do util_log_info "  [rollback] $_line"; done <<< "$_RB_OUT"
         util_log_info "  OLS failed -- rolled back to official repo"
       fi
       util_log_info "  OLS rolled back -- trying vault next"
@@ -268,11 +272,10 @@ if [[ "${GUEST_ENABLE_VAULT_FALLBACK:-0}" == "1" ]] && \
       if [[ "${GUEST_REPO_DRIVER:-apt}" == "dnf-repo" ]]; then
     _VVAL_CMD="${GUEST_VAULT_VALIDATION_COMMAND:-${GUEST_REPO_VALIDATION_COMMAND:-dnf clean all && dnf -y makecache}}"
   else
-    _VVAL_CMD="${GUEST_VAULT_VALIDATION_COMMAND:-${GUEST_REPO_VALIDATION_COMMAND:-apt-get clean && apt-get update}}"
+    _VVAL_CMD="${GUEST_VAULT_VALIDATION_COMMAND:-${GUEST_REPO_VALIDATION_COMMAND:-apt-get clean && apt-get update}}" 
   fi
       _VVAL_EXIT=0
-      _VVAL_OUT="$(_gssh "DEBIAN_FRONTEND=noninteractive $_VVAL_CMD" 2>&1)" || _VVAL_EXIT=$?
-      while IFS= read -r _line; do util_log_info "  [vault-val] $_line"; done <<< "$_VVAL_OUT"
+      _gssh_log "vault-val" "DEBIAN_FRONTEND=noninteractive $_VVAL_CMD" || _VVAL_EXIT=$?
 
       if [[ $_VVAL_EXIT -eq 0 ]]; then
         util_log_info "  vault validation OK -> using vault"
@@ -286,9 +289,9 @@ if [[ "${GUEST_ENABLE_VAULT_FALLBACK:-0}" == "1" ]] && \
         _VROLLBACK="${GUEST_REPO_FAILBACK_ACTION:-restore-backup}"
         if [[ "$_VROLLBACK" == "restore-backup" ]]; then
           if [[ "${GUEST_REPO_DRIVER:-apt}" == "dnf-repo" ]]; then
-            _gssh "cp $_BACKUP_DIR/*.repo /etc/yum.repos.d/ 2>/dev/null || true; dnf clean all; echo vault-rollback-done" 2>&1 || true
+            _gssh_log "vault-rollback" "cp $_BACKUP_DIR/*.repo /etc/yum.repos.d/ 2>/dev/null || true; dnf clean all; echo vault-rollback-done" || true
           else
-            _gssh "cp $_BACKUP_DIR/*.list /etc/apt/sources.list.d/ 2>/dev/null || true; cp $_BACKUP_DIR/*.sources /etc/apt/sources.list.d/ 2>/dev/null || true; cp $_BACKUP_DIR/sources.list /etc/apt/ 2>/dev/null || true; apt-get clean; echo vault-rollback-done" 2>&1 || true
+            _gssh_log "vault-rollback" "cp $_BACKUP_DIR/*.list /etc/apt/sources.list.d/ 2>/dev/null || true; cp $_BACKUP_DIR/*.sources /etc/apt/sources.list.d/ 2>/dev/null || true; cp $_BACKUP_DIR/sources.list /etc/apt/ 2>/dev/null || true; apt-get clean; echo vault-rollback-done" || true
           fi
           util_log_info "  vault rolled back -- trying official as last resort"
         fi
@@ -310,8 +313,7 @@ if [[ "$_REPO_MODE_USED" != "ols" && "$_REPO_MODE_USED" != "vault" ]]; then
     _LAST_CMD="${GUEST_REPO_BASELINE_UPDATE_COMMAND:-apt-get update}"
   fi
   _LAST_EXIT=0
-  _LAST_OUT="$(_gssh "DEBIAN_FRONTEND=noninteractive $_LAST_CMD" 2>&1)" || _LAST_EXIT=$?
-  while IFS= read -r _line; do util_log_info "  [official-lr] $_line"; done <<< "$_LAST_OUT"
+  _gssh_log "official-lr" "DEBIAN_FRONTEND=noninteractive $_LAST_CMD" || _LAST_EXIT=$?
 
   if [[ $_LAST_EXIT -eq 0 ]]; then
     util_log_info "  official repo OK (last resort) -> continuing"
@@ -337,8 +339,7 @@ if [[ "${GUEST_RUN_BASELINE_UPDATE:-0}" == "1" ]]; then
     _UPD_CMD="${GUEST_UPDATE_COMMAND:-apt-get update}"
   fi
   _UPD_EXIT=0
-  _UPD_OUT="$(_gssh "DEBIAN_FRONTEND=noninteractive $_UPD_CMD" 2>&1)" || _UPD_EXIT=$?
-  while IFS= read -r _line; do util_log_info "  [update] $_line"; done <<< "$_UPD_OUT"
+  _gssh_log "update" "DEBIAN_FRONTEND=noninteractive $_UPD_CMD" || _UPD_EXIT=$?
   [[ $_UPD_EXIT -ne 0 ]] && _fail "Update failed (exit=$_UPD_EXIT)"
   util_log_info "  Update OK"
   _STEPS+=("update")
@@ -350,8 +351,7 @@ if [[ "${GUEST_RUN_FULL_UPGRADE:-0}" == "1" ]]; then
     _UPG_CMD="${GUEST_UPGRADE_COMMAND:-DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade -y}"
   fi
   _UPG_EXIT=0
-  _UPG_OUT="$(_gssh "DEBIAN_FRONTEND=noninteractive $_UPG_CMD" 2>&1)" || _UPG_EXIT=$?
-  while IFS= read -r _line; do util_log_info "  [upgrade] $_line"; done <<< "$_UPG_OUT"
+  _gssh_log "upgrade" "DEBIAN_FRONTEND=noninteractive $_UPG_CMD" || _UPG_EXIT=$?
   [[ $_UPG_EXIT -ne 0 ]] && _fail "Upgrade failed (exit=$_UPG_EXIT)"
   util_log_info "  Upgrade OK"
   _STEPS+=("upgrade")
@@ -362,8 +362,7 @@ util_log_info "--- Phase 7: Install Packages ---"
 if [[ -n "${GUEST_REQUIRED_PACKAGES:-}" ]]; then
   _INST_CMD="${GUEST_INSTALL_COMMAND:-DEBIAN_FRONTEND=noninteractive apt-get install -y}"
   _PKG_EXIT=0
-  _PKG_OUT="$(_gssh "DEBIAN_FRONTEND=noninteractive $_INST_CMD $GUEST_REQUIRED_PACKAGES" 2>&1)" || _PKG_EXIT=$?
-  while IFS= read -r _line; do util_log_info "  [pkg] $_line"; done <<< "$_PKG_OUT"
+  _gssh_log "pkg" "DEBIAN_FRONTEND=noninteractive $_INST_CMD $GUEST_REQUIRED_PACKAGES" || _PKG_EXIT=$?      
   if [[ $_PKG_EXIT -ne 0 ]] && [[ "${GUEST_FAIL_ON_PACKAGE_ERROR:-0}" == "1" ]]; then
     _fail "Package install failed (exit=$_PKG_EXIT)"
   fi
@@ -382,7 +381,7 @@ if [[ "${GUEST_REBOOT_AFTER_UPGRADE:-0}" == "1" ]]; then
   while [[ $_DOWN_ELAPSED -lt 120 ]]; do
     sleep 10
     _DOWN_ELAPSED=$(( _DOWN_ELAPSED + 10 ))
-    if ! ssh_run "$GUEST_IP" "$_G_PORT" "$_G_USER" "$_G_AUTH_MODE" "$_G_AUTH_VAL" "true" >/dev/null 2>&1; then
+    if ! ssh_run "$GUEST_IP" "$_G_PORT" "$_G_USER" "$_G_AUTH_MODE" "$_G_AUTH_VAL" "true" >/dev/null 2>&1; then       
       util_log_info "  SSH is DOWN after ${_DOWN_ELAPSED}s — reboot confirmed"
       break
     fi
