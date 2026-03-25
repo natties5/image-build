@@ -1,4 +1,8 @@
-# Guest Configure — Full Phase Test (Ubuntu 24.04)
+﻿# Guest Configure â€” Full Phase Test (Ubuntu 24.04)
+
+> Historical Context Note
+> This summary is preserved as a run record. Terminology and flow may be superseded by current code (see AIlogtest/00_INDEX.md and ebuild-project-doc/00_INDEX.md).
+
 Date: 2026-03-22T14:01:13Z
 Branch: fix/fresh-clone-and-paths
 
@@ -21,18 +25,18 @@ Branch: fix/fresh-clone-and-paths
 | clean     | 0    | 397s     | PASS   |
 
 ## Configure Phase Detail
-- LEGACY_MIRROR available: YES (LEGACY_MIRROR was reachable — used)
+- LEGACY_MIRROR available: YES (LEGACY_MIRROR was reachable â€” used)
 - Reboot completed: YES (SSH back after 15s)
 - Packages installed: qemu-guest-agent (new), liburing2 (dep); cloud-init, sudo, curl, wget, rsync, ca-certificates, cloud-guest-utils already current
 - SSH policy applied: YES (/etc/ssh/sshd_config.d/99-image-build.conf)
 - Steps completed: preflight, cloud-init-wait, baseline-repo, repo-backup, ols, update, upgrade, packages, reboot, timezone, locale, disable-autoupdate, disable-firewall, ssh-policy, services
-- Locale note: locale-gen ran; update-locale had a minor warning (format mismatch) — non-fatal
+- Locale note: locale-gen ran; update-locale had a minor warning (format mismatch) â€” non-fatal
 
 ## Errors (if any)
 - Locale warning: 
-  → locale-gen format passed to update-locale; non-fatal, timezone was set correctly
-- Clean: SSH connection reset after cloud-init clean (SSH host keys removed) — expected behavior
-  → fstrim/shutdown via SSH failed; fallback: os_stop_server (OpenStack API) succeeded
+  â†’ locale-gen format passed to update-locale; non-fatal, timezone was set correctly
+- Clean: SSH connection reset after cloud-init clean (SSH host keys removed) â€” expected behavior
+  â†’ fstrim/shutdown via SSH failed; fallback: os_stop_server (OpenStack API) succeeded
 
 ## State Files
 runtime/state/import/ubuntu-24.04.json   (READY)
@@ -40,6 +44,7 @@ runtime/state/create/ubuntu-24.04.json   (READY)
 runtime/state/configure/ubuntu-24.04.json (READY)
 runtime/state/clean/ubuntu-24.04.json    (READY)
 
-## Remaining Resources (publish skipped — clean up manually or run publish)
-- Server: build-ubuntu-24.04-20260322205007 (id: 99d631e2-16bf-41b9-b18d-0d2005bbebe2) — SHUTOFF
-- Volume: vol-ubuntu-24.04-20260322205007 (id: eddb8a54-3b6d-4ee2-8bd5-0252e4f6ee86) — in-use (attached to SHUTOFF server)
+## Remaining Resources (publish skipped â€” clean up manually or run publish)
+- Server: build-ubuntu-24.04-20260322205007 (id: 99d631e2-16bf-41b9-b18d-0d2005bbebe2) â€” SHUTOFF
+- Volume: vol-ubuntu-24.04-20260322205007 (id: eddb8a54-3b6d-4ee2-8bd5-0252e4f6ee86) â€” in-use (attached to SHUTOFF server)
+

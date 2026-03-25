@@ -1,4 +1,8 @@
-# Vault Logic Implementation — configure_guest.sh
+﻿# Vault Logic Implementation â€” configure_guest.sh
+
+> Historical Context Note
+> This summary is preserved as a run record. Terminology and flow may be superseded by current code (see AIlogtest/00_INDEX.md and ebuild-project-doc/00_INDEX.md).
+
 Date: 2026-03-22T17:51:15Z
 Branch: fix/fresh-clone-and-paths
 
@@ -11,20 +15,20 @@ File: phases/configure_guest.sh
 - _VAULT_ATTEMPTED, _VAULT_REACHABLE
 - _OFFICIAL_DEGRADED
 
-### Phase 5 — new flow
-official → LEGACY_MIRROR → vault → official-fallback → failed
+### Phase 5 â€” new flow
+official â†’ LEGACY_MIRROR â†’ vault â†’ official-fallback â†’ failed
 
-### Phase 5b (NEW) — Vault Injection
+### Phase 5b (NEW) â€” Vault Injection
 - triggered when: LEGACY_MIRROR fails OR LEGACY_MIRROR unreachable
 - checks GUEST_VAULT_URL reachable via curl
 - injects vault URL for apt (sources.list + .sources) OR dnf (*.repo)
 - validates with GUEST_VAULT_VALIDATION_COMMAND
 - rollback to backup if vault validation fails
 
-### Phase 5c (NEW) — Official Last Resort
+### Phase 5c (NEW) â€” Official Last Resort
 - triggered when: both LEGACY_MIRROR and vault failed
 - re-tests official repo one more time
-- if fails → repo_mode=failed → pipeline STOP
+- if fails â†’ repo_mode=failed â†’ pipeline STOP
 
 ### JSON output new fields
 repo_mode_used, repo_mode_reason,
@@ -44,8 +48,9 @@ vault_attempted, vault_reachable
 ## repo_mode_used values in production
 | value | meaning |
 |-------|---------|
-| official | normal — LEGACY_MIRROR disabled or skipped |
+| official | normal â€” LEGACY_MIRROR disabled or skipped |
 | ols | LEGACY_MIRROR mirror used successfully |
-| vault | LEGACY_MIRROR failed — vault used |
-| official-fallback | LEGACY_MIRROR+vault failed — back to official |
-| failed | all options exhausted — pipeline stopped |
+| vault | LEGACY_MIRROR failed â€” vault used |
+| official-fallback | LEGACY_MIRROR+vault failed â€” back to official |
+| failed | all options exhausted â€” pipeline stopped |
+

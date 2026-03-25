@@ -1,12 +1,16 @@
-# Fix: Repo Driver + Restore — configure_guest + clean_guest
+﻿# Fix: Repo Driver + Restore â€” configure_guest + clean_guest
+
+> Historical Context Note
+> This summary is preserved as a run record. Terminology and flow may be superseded by current code (see AIlogtest/00_INDEX.md and ebuild-project-doc/00_INDEX.md).
+
 Date: 2026-03-23T00:00:00Z
 Branch: fix/fresh-clone-and-paths
 
 ## Root Cause
 configure_guest.sh defaulted to apt-get for ALL OS families.
-dnf-family OS (Rocky/AlmaLinux/Fedora) got wrong commands →
-official repo falsely degraded → vault used unnecessarily.
-clean_guest.sh never restored official repo before poweroff →
+dnf-family OS (Rocky/AlmaLinux/Fedora) got wrong commands â†’
+official repo falsely degraded â†’ vault used unnecessarily.
+clean_guest.sh never restored official repo before poweroff â†’
 final image had vault/LEGACY_MIRROR repo instead of official.
 
 ## Fixes Applied
@@ -21,14 +25,14 @@ final image had vault/LEGACY_MIRROR repo instead of official.
 
 ## Impact
 After this fix:
-- dnf OS baseline test uses dnf → official repo correctly detected
+- dnf OS baseline test uses dnf â†’ official repo correctly detected
 - update/upgrade uses correct package manager
 - final image always has official repo (not vault/LEGACY_MIRROR)
 - ubuntu/debian unaffected
 
 ## Needs Rebuild
 almalinux 8/9/10, rocky 8/9/10 (vault repo was in final image)
-ubuntu 24.04 — NOT affected
+ubuntu 24.04 â€” NOT affected
 
 ## Test Results
 | Test | Result |
@@ -41,3 +45,4 @@ ubuntu 24.04 — NOT affected
 | FIX 6 restore in clean | PASS |
 | git diff stat (only 2 files) | PASS |
 | apt-get count < dnf count | PASS (11 vs 18) |
+

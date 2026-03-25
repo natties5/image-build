@@ -1,4 +1,8 @@
-# Doc Update — Vault Fallback + Failure Behavior
+﻿# Doc Update â€” Vault Fallback + Failure Behavior
+
+> Historical Context Note
+> This summary is preserved as a run record. Terminology and flow may be superseded by current code (see AIlogtest/00_INDEX.md and ebuild-project-doc/00_INDEX.md).
+
 Date: 2026-03-22T00:00:00+07:00
 Branch: fix/fresh-clone-and-paths
 
@@ -19,7 +23,7 @@ Branch: fix/fresh-clone-and-paths
 | config/guest/fedora/default.env | +3 VAULT lines |
 
 ## New Repo Flow
-official → LEGACY_MIRROR → vault → official-fallback → failed
+official â†’ LEGACY_MIRROR â†’ vault â†’ official-fallback â†’ failed
 
 ## New Config Fields Added
 - GUEST_ENABLE_VAULT_FALLBACK
@@ -41,3 +45,4 @@ official → LEGACY_MIRROR → vault → official-fallback → failed
 | rocky | dl.rockylinux.org/vault/rocky |
 | almalinux | repo.almalinux.org/vault |
 | fedora | archives.fedoraproject.org |
+

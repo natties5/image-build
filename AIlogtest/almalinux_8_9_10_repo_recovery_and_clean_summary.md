@@ -1,4 +1,8 @@
-# Summary: AlmaLinux 8/9/10 Repo Recovery and Clean Stage Success
+﻿# Summary: AlmaLinux 8/9/10 Repo Recovery and Clean Stage Success
+
+> Historical Context Note
+> This summary is preserved as a run record. Terminology and flow may be superseded by current code (see AIlogtest/00_INDEX.md and ebuild-project-doc/00_INDEX.md).
+
 **Timestamp:** 2026-03-23T21:20:00Z
 **Host:** prd-gate2-imagebuild (192.168.90.48)
 **Scope:** AlmaLinux 8, 9, 10
@@ -59,3 +63,4 @@
 ## Git Workflow
 - All changes applied to `/mnt/vol-image/image-build` on the jump host.
 - Committing and pushing from the authoritative environment.
+

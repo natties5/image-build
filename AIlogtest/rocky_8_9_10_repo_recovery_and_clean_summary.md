@@ -1,4 +1,8 @@
-# Summary: Rocky 8/9/10 Repo Recovery and Clean Stage Success
+﻿# Summary: Rocky 8/9/10 Repo Recovery and Clean Stage Success
+
+> Historical Context Note
+> This summary is preserved as a run record. Terminology and flow may be superseded by current code (see AIlogtest/00_INDEX.md and ebuild-project-doc/00_INDEX.md).
+
 **Timestamp:** 2026-03-23T17:40:00Z
 **Host:** prd-gate2-imagebuild (192.168.90.48)
 **Scope:** Rocky Linux 8, 9, 10
@@ -47,4 +51,5 @@
 ## Remaining Caveats
 - LEGACY_MIRROR and Vault for Rocky 8/9/10 are currently returning 404 at the expected paths. Pipeline successfully handles this via official fallback.
 - Publish stage was intentionally NOT run per instructions.
+
 
