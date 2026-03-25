@@ -84,15 +84,11 @@ if [[ -z "$GUEST_IP" ]]; then
 fi
 util_log_info "  Guest IP: $GUEST_IP  Server: $SERVER_ID  Volume: ${VOLUME_ID:-n/a}"
 
-_OLS_USED=false
-_OLS_SKIPPED=false
 _REBOOT_DONE=false
 _STEPS=()
 
 _REPO_MODE_USED="official"
 _REPO_MODE_REASON="official_ok"
-_OLS_ATTEMPTED=false
-_OLS_REACHABLE=false
 _VAULT_ATTEMPTED=false
 _VAULT_REACHABLE=false
 _OFFICIAL_DEGRADED=false
@@ -184,129 +180,85 @@ fi
 util_log_info "  [backup] $_BACKUP_OUT (exit=${_BACKUP_EXIT})"
 _STEPS+=("repo-backup")
 
-# --- PHASE 5: Repo Selection (OLS -> vault -> official-fallback) -------------
-_OLS_ATTEMPTED=false
-_VAULT_ATTEMPTED=false
+# --- PHASE 5: Repo Selection (official → vault → official-fallback) ----------
+util_log_info "--- Phase 5: Repo Selection ---"
 
-if [[ "${GUEST_ENABLE_OLS_FAILOVER:-0}" == "1" ]]; then
-  util_log_info "--- Phase 5: OLS Injection ---"
-  _OLS_ATTEMPTED=true
-
-  _OLS_URL="${GUEST_OLS_URL:-http://mirrors.openlandscape.cloud}"
-  _OLS_CHECK_OUT="$(_gssh "curl -s --max-time 10 $_OLS_URL -o /dev/null && echo ols-ok || echo ols-skip" 2>&1)" || true
-
-  if echo "$_OLS_CHECK_OUT" | grep -q "ols-ok"; then
-    _OLS_REACHABLE=true
-    util_log_info "  OLS reachable: $_OLS_URL"
-
-    # Inject OLS (existing injection logic -- keep as-is)
-    util_log_info "  Injecting OLS mirror: $_OLS_URL"
-    if [[ "${GUEST_REPO_DRIVER:-apt}" == "dnf-repo" ]]; then
-      _INJ_OUT="$(_gssh "for f in /etc/yum.repos.d/*.repo; do [ -f \"\$f\" ] || continue; sed -i 's|^mirrorlist=|#mirrorlist=|g' \"\$f\" 2>/dev/null || true; sed -i 's|^metalink=|#metalink=|g' \"\$f\" 2>/dev/null || true; sed -i \"s|^#baseurl=http://dl.rockylinux.org|baseurl=$_OLS_URL|g\" \"\$f\" 2>/dev/null || true; sed -i \"s|^#baseurl=https://dl.rockylinux.org|baseurl=$_OLS_URL|g\" \"\$f\" 2>/dev/null || true; sed -i \"s|^baseurl=https://repo.almalinux.org|baseurl=$_OLS_URL|g\" \"\$f\" 2>/dev/null || true; sed -i \"s|^#baseurl=https://repo.almalinux.org|baseurl=$_OLS_URL|g\" \"\$f\" 2>/dev/null || true; done; echo inject-done" 2>&1)" || true
-    else
-      _INJ_OUT="$(_gssh "for f in /etc/apt/sources.list.d/*.sources; do [ -f \"\$f\" ] || continue; sed -i 's|URIs: http://archive.ubuntu.com/ubuntu|URIs: $_OLS_URL/ubuntu|g' \"\$f\" 2>/dev/null || true; sed -i 's|URIs: http://security.ubuntu.com/ubuntu|URIs: $_OLS_URL/ubuntu|g' \"\$f\" 2>/dev/null || true; done; if [ -f /etc/apt/sources.list ]; then sed -i 's|http://archive.ubuntu.com/ubuntu|$_OLS_URL/ubuntu|g' /etc/apt/sources.list 2>/dev/null || true; sed -i 's|http://security.ubuntu.com/ubuntu|$_OLS_URL/ubuntu|g' /etc/apt/sources.list 2>/dev/null || true; fi; echo inject-done" 2>&1)" || true
-    fi
-    util_log_info "  [ols-inject] $_INJ_OUT"
-
-    # Validate OLS
-    _VAL_CMD="${GUEST_REPO_VALIDATION_COMMAND:-apt-get clean && apt-get update}"
-    _VAL_EXIT=0
-    _gssh_log "ols-val" "DEBIAN_FRONTEND=noninteractive $_VAL_CMD" || _VAL_EXIT=$?
-
-    if [[ $_VAL_EXIT -eq 0 ]]; then
-      util_log_info "  OLS validation OK -> using OLS"
-      _REPO_MODE_USED="ols"
-      _REPO_MODE_REASON="ols_ok"
-      _OLS_USED=true
-    else
-      util_log_warn "  OLS validation FAILED (exit=$_VAL_EXIT)"
-      _REPO_MODE_REASON="ols_failed"
-      _OLS_USED=false
-      # Rollback OLS -> restore backup (existing rollback logic -- keep as-is)
-      _FAILBACK="${GUEST_REPO_FAILBACK_ACTION:-restore-backup}"
-      if [[ "$_FAILBACK" == "restore-backup" ]]; then
-        if [[ "${GUEST_REPO_DRIVER:-apt}" == "dnf-repo" ]]; then
-          _gssh_log "rollback" "cp $_BACKUP_DIR/*.repo /etc/yum.repos.d/ 2>/dev/null || true; dnf clean all; dnf -y makecache; echo rollback-done" || true
-        else
-          _gssh_log "rollback" "cp $_BACKUP_DIR/*.list /etc/apt/sources.list.d/ 2>/dev/null || true; cp $_BACKUP_DIR/*.sources /etc/apt/sources.list.d/ 2>/dev/null || true; cp $_BACKUP_DIR/sources.list /etc/apt/ 2>/dev/null || true; DEBIAN_FRONTEND=noninteractive apt-get update; echo rollback-done" || true
-        fi
-        util_log_info "  OLS failed -- rolled back to official repo"
-      fi
-      util_log_info "  OLS rolled back -- trying vault next"
-    fi
-  else
-    util_log_info "  OLS not reachable: $_OLS_CHECK_OUT"
-    _OLS_REACHABLE=false
-    _REPO_MODE_REASON="ols_unreachable"
-  fi
+# STEP 1: test official repo
+if [[ "${GUEST_REPO_DRIVER:-apt}" == "dnf-repo" ]]; then
+  _OFFICIAL_CMD="${GUEST_REPO_BASELINE_UPDATE_COMMAND:-dnf clean all && dnf -y makecache}"
 else
-  util_log_info "--- Phase 5: OLS disabled ---"
+  _OFFICIAL_CMD="${GUEST_REPO_BASELINE_UPDATE_COMMAND:-apt-get update}"
+fi
+_OFFICIAL_EXIT=0
+_gssh_log "official-test" "DEBIAN_FRONTEND=noninteractive $_OFFICIAL_CMD" || _OFFICIAL_EXIT=$?
+if [[ $_OFFICIAL_EXIT -eq 0 ]]; then
+  _REPO_MODE_USED="official"
+  _REPO_MODE_REASON="official_ok"
+  _OFFICIAL_DEGRADED=false
+  util_log_info "  official repo OK -> using official"
+else
+  _OFFICIAL_DEGRADED=true
+  _REPO_MODE_REASON="official_degraded"
+  util_log_warn "  official repo degraded -- trying vault"
 fi
 
-# -- Vault fallback (if OLS failed or unreachable) ----------------------------
-if [[ "${GUEST_ENABLE_VAULT_FALLBACK:-0}" == "1" ]] && \
-   [[ "$_REPO_MODE_USED" != "ols" ]]; then
+# STEP 2: vault fallback (if official failed and vault is configured)
+if [[ "$_OFFICIAL_DEGRADED" == "true" ]] && \
+   [[ "${GUEST_ENABLE_VAULT_FALLBACK:-0}" == "1" ]] && \
+   [[ -n "${GUEST_VAULT_URL:-}" ]]; then
+  util_log_info "--- Phase 5 Step 2: Vault Fallback ---"
+  _VAULT_ATTEMPTED=true
+  _VAULT_URL="${GUEST_VAULT_URL}"
 
-  _VAULT_URL="${GUEST_VAULT_URL:-}"
-  if [[ -z "$_VAULT_URL" ]]; then
-    util_log_info "  vault skipped: GUEST_VAULT_URL not set"
-  else
-    util_log_info "--- Phase 5b: Vault Fallback ---"
-    _VAULT_ATTEMPTED=true
+  _VAULT_CHECK="$(_gssh "curl -s --max-time 10 $_VAULT_URL -o /dev/null && echo vault-ok || echo vault-skip" 2>&1)" || true
 
-    _VAULT_CHECK="$(_gssh "curl -s --max-time 10 $_VAULT_URL -o /dev/null && echo vault-ok || echo vault-skip" 2>&1)" || true
+  if echo "$_VAULT_CHECK" | grep -q "vault-ok"; then
+    _VAULT_REACHABLE=true
+    util_log_info "  vault reachable: $_VAULT_URL"
 
-    if echo "$_VAULT_CHECK" | grep -q "vault-ok"; then
-      _VAULT_REACHABLE=true
-      util_log_info "  vault reachable: $_VAULT_URL"
-
-      # Inject vault -- same method as OLS injection but use VAULT_URL
-      if [[ "${GUEST_REPO_DRIVER:-apt}" == "dnf-repo" ]]; then
-        _VINJ_OUT="$(_gssh "for f in /etc/yum.repos.d/*.repo; do [ -f \"\$f\" ] || continue; sed -i 's|^mirrorlist=|#mirrorlist=|g' \"\$f\" 2>/dev/null || true; sed -i 's|^metalink=|#metalink=|g' \"\$f\" 2>/dev/null || true; sed -i \"s|^baseurl=https://dl.rockylinux.org|baseurl=$_VAULT_URL|g\" \"\$f\" 2>/dev/null || true; sed -i \"s|^baseurl=https://repo.almalinux.org|baseurl=$_VAULT_URL|g\" \"\$f\" 2>/dev/null || true; sed -i \"s|^#baseurl=|baseurl=$_VAULT_URL/|g\" \"\$f\" 2>/dev/null || true; done; echo vault-inject-done" 2>&1)" || true
-      else
-        _VINJ_OUT="$(_gssh "for f in /etc/apt/sources.list.d/*.sources; do [ -f \"\$f\" ] || continue; sed -i \"s|URIs: http://archive.ubuntu.com/ubuntu|URIs: $_VAULT_URL|g\" \"\$f\" 2>/dev/null || true; sed -i \"s|URIs: http://security.ubuntu.com/ubuntu|URIs: $_VAULT_URL|g\" \"\$f\" 2>/dev/null || true; sed -i \"s|URIs: https://deb.debian.org/debian|URIs: $_VAULT_URL|g\" \"\$f\" 2>/dev/null || true; done; if [ -f /etc/apt/sources.list ]; then sed -i \"s|http://archive.ubuntu.com/ubuntu|$_VAULT_URL|g\" /etc/apt/sources.list 2>/dev/null || true; sed -i \"s|http://security.ubuntu.com/ubuntu|$_VAULT_URL|g\" /etc/apt/sources.list 2>/dev/null || true; sed -i \"s|http://deb.debian.org/debian|$_VAULT_URL|g\" /etc/apt/sources.list 2>/dev/null || true; fi; echo vault-inject-done" 2>&1)" || true
-      fi
-      util_log_info "  [vault-inject] $_VINJ_OUT"
-
-      # Validate vault
-      if [[ "${GUEST_REPO_DRIVER:-apt}" == "dnf-repo" ]]; then
-    _VVAL_CMD="${GUEST_VAULT_VALIDATION_COMMAND:-${GUEST_REPO_VALIDATION_COMMAND:-dnf clean all && dnf -y makecache}}"
-  else
-    _VVAL_CMD="${GUEST_VAULT_VALIDATION_COMMAND:-${GUEST_REPO_VALIDATION_COMMAND:-apt-get clean && apt-get update}}" 
-  fi
-      _VVAL_EXIT=0
-      _gssh_log "vault-val" "DEBIAN_FRONTEND=noninteractive $_VVAL_CMD" || _VVAL_EXIT=$?
-
-      if [[ $_VVAL_EXIT -eq 0 ]]; then
-        util_log_info "  vault validation OK -> using vault"
-        _REPO_MODE_USED="vault"
-        _REPO_MODE_REASON="ols_failed_vault_ok"
-      else
-        util_log_warn "  vault validation FAILED (exit=$_VVAL_EXIT)"
-        _VAULT_REACHABLE=false
-        _REPO_MODE_REASON="vault_failed"
-        # Rollback vault -> restore backup
-        _VROLLBACK="${GUEST_REPO_FAILBACK_ACTION:-restore-backup}"
-        if [[ "$_VROLLBACK" == "restore-backup" ]]; then
-          if [[ "${GUEST_REPO_DRIVER:-apt}" == "dnf-repo" ]]; then
-            _gssh_log "vault-rollback" "cp $_BACKUP_DIR/*.repo /etc/yum.repos.d/ 2>/dev/null || true; dnf clean all; echo vault-rollback-done" || true
-          else
-            _gssh_log "vault-rollback" "cp $_BACKUP_DIR/*.list /etc/apt/sources.list.d/ 2>/dev/null || true; cp $_BACKUP_DIR/*.sources /etc/apt/sources.list.d/ 2>/dev/null || true; cp $_BACKUP_DIR/sources.list /etc/apt/ 2>/dev/null || true; apt-get clean; echo vault-rollback-done" || true
-          fi
-          util_log_info "  vault rolled back -- trying official as last resort"
-        fi
-      fi
+    # Inject vault URL into repo files
+    if [[ "${GUEST_REPO_DRIVER:-apt}" == "dnf-repo" ]]; then
+      _VINJ_OUT="$(_gssh "for f in /etc/yum.repos.d/*.repo; do [ -f \"\$f\" ] || continue; sed -i 's|^mirrorlist=|#mirrorlist=|g' \"\$f\" 2>/dev/null || true; sed -i 's|^metalink=|#metalink=|g' \"\$f\" 2>/dev/null || true; sed -i \"s|^baseurl=https://dl.rockylinux.org|baseurl=$_VAULT_URL|g\" \"\$f\" 2>/dev/null || true; sed -i \"s|^baseurl=https://repo.almalinux.org|baseurl=$_VAULT_URL|g\" \"\$f\" 2>/dev/null || true; sed -i \"s|^#baseurl=|baseurl=$_VAULT_URL/|g\" \"\$f\" 2>/dev/null || true; done; echo vault-inject-done" 2>&1)" || true
     else
-      util_log_warn "  vault not reachable: $_VAULT_CHECK"
-      _VAULT_REACHABLE=false
-      _REPO_MODE_REASON="vault_unreachable"
+      _VINJ_OUT="$(_gssh "for f in /etc/apt/sources.list.d/*.sources; do [ -f \"\$f\" ] || continue; sed -i \"s|URIs: http://archive.ubuntu.com/ubuntu|URIs: $_VAULT_URL|g\" \"\$f\" 2>/dev/null || true; sed -i \"s|URIs: http://security.ubuntu.com/ubuntu|URIs: $_VAULT_URL|g\" \"\$f\" 2>/dev/null || true; sed -i \"s|URIs: https://deb.debian.org/debian|URIs: $_VAULT_URL|g\" \"\$f\" 2>/dev/null || true; done; if [ -f /etc/apt/sources.list ]; then sed -i \"s|http://archive.ubuntu.com/ubuntu|$_VAULT_URL|g\" /etc/apt/sources.list 2>/dev/null || true; sed -i \"s|http://security.ubuntu.com/ubuntu|$_VAULT_URL|g\" /etc/apt/sources.list 2>/dev/null || true; sed -i \"s|http://deb.debian.org/debian|$_VAULT_URL|g\" /etc/apt/sources.list 2>/dev/null || true; fi; echo vault-inject-done" 2>&1)" || true
     fi
+    util_log_info "  [vault-inject] $_VINJ_OUT"
+
+    # Validate vault
+    if [[ "${GUEST_REPO_DRIVER:-apt}" == "dnf-repo" ]]; then
+      _VVAL_CMD="${GUEST_VAULT_VALIDATION_COMMAND:-dnf clean all && dnf -y makecache}"
+    else
+      _VVAL_CMD="${GUEST_VAULT_VALIDATION_COMMAND:-apt-get update}"
+    fi
+    _VVAL_EXIT=0
+    _gssh_log "vault-val" "DEBIAN_FRONTEND=noninteractive $_VVAL_CMD" || _VVAL_EXIT=$?
+
+    if [[ $_VVAL_EXIT -eq 0 ]]; then
+      util_log_info "  vault validation OK -> using vault"
+      _REPO_MODE_USED="vault"
+      _REPO_MODE_REASON="official_degraded_vault_ok"
+    else
+      util_log_warn "  vault validation FAILED (exit=$_VVAL_EXIT)"
+      _VAULT_REACHABLE=false
+      _REPO_MODE_REASON="vault_failed"
+      # Rollback vault -> restore backup, go to step 3
+      if [[ "${GUEST_REPO_DRIVER:-apt}" == "dnf-repo" ]]; then
+        _gssh_log "vault-rollback" "cp $_BACKUP_DIR/*.repo /etc/yum.repos.d/ 2>/dev/null || true; dnf clean all; echo vault-rollback-done" || true
+      else
+        _gssh_log "vault-rollback" "cp $_BACKUP_DIR/*.list /etc/apt/sources.list.d/ 2>/dev/null || true; cp $_BACKUP_DIR/*.sources /etc/apt/sources.list.d/ 2>/dev/null || true; cp $_BACKUP_DIR/sources.list /etc/apt/ 2>/dev/null || true; echo vault-rollback-done" || true
+      fi
+      util_log_info "  vault failed -- trying official as last resort"
+    fi
+  else
+    util_log_warn "  vault not reachable: $_VAULT_CHECK"
+    _VAULT_REACHABLE=false
+    _REPO_MODE_REASON="vault_unreachable"
   fi
 fi
 
-# -- Official last resort (if OLS + vault both failed) ------------------------
-if [[ "$_REPO_MODE_USED" != "ols" && "$_REPO_MODE_USED" != "vault" ]]; then
-  util_log_info "--- Phase 5c: Official Repo (last resort) ---"
+# STEP 3: official last resort (if vault failed or was not attempted)
+if [[ "$_OFFICIAL_DEGRADED" == "true" && "$_REPO_MODE_USED" != "vault" ]]; then
+  util_log_info "--- Phase 5 Step 3: Official Repo (last resort) ---"
   if [[ "${GUEST_REPO_DRIVER:-apt}" == "dnf-repo" ]]; then
     _LAST_CMD="${GUEST_REPO_BASELINE_UPDATE_COMMAND:-dnf clean all && dnf -y makecache}"
   else
@@ -318,12 +270,11 @@ if [[ "$_REPO_MODE_USED" != "ols" && "$_REPO_MODE_USED" != "vault" ]]; then
   if [[ $_LAST_EXIT -eq 0 ]]; then
     util_log_info "  official repo OK (last resort) -> continuing"
     _REPO_MODE_USED="official-fallback"
-    _REPO_MODE_REASON="ols_and_vault_failed_official_ok"
+    _REPO_MODE_REASON="vault_failed_official_ok"
   else
-    util_log_warn "  ALL repo modes failed: official + OLS + vault"
     _REPO_MODE_USED="failed"
     _REPO_MODE_REASON="all_repos_failed"
-    _fail "all repo modes exhausted (official + OLS + vault all failed)"
+    _fail "all repo options exhausted — pipeline cannot continue"
   fi
 fi
 
@@ -362,7 +313,7 @@ util_log_info "--- Phase 7: Install Packages ---"
 if [[ -n "${GUEST_REQUIRED_PACKAGES:-}" ]]; then
   _INST_CMD="${GUEST_INSTALL_COMMAND:-DEBIAN_FRONTEND=noninteractive apt-get install -y}"
   _PKG_EXIT=0
-  _gssh_log "pkg" "DEBIAN_FRONTEND=noninteractive $_INST_CMD $GUEST_REQUIRED_PACKAGES" || _PKG_EXIT=$?      
+  _gssh_log "pkg" "DEBIAN_FRONTEND=noninteractive $_INST_CMD $GUEST_REQUIRED_PACKAGES" || _PKG_EXIT=$?
   if [[ $_PKG_EXIT -ne 0 ]] && [[ "${GUEST_FAIL_ON_PACKAGE_ERROR:-0}" == "1" ]]; then
     _fail "Package install failed (exit=$_PKG_EXIT)"
   fi
@@ -381,7 +332,7 @@ if [[ "${GUEST_REBOOT_AFTER_UPGRADE:-0}" == "1" ]]; then
   while [[ $_DOWN_ELAPSED -lt 120 ]]; do
     sleep 10
     _DOWN_ELAPSED=$(( _DOWN_ELAPSED + 10 ))
-    if ! ssh_run "$GUEST_IP" "$_G_PORT" "$_G_USER" "$_G_AUTH_MODE" "$_G_AUTH_VAL" "true" >/dev/null 2>&1; then       
+    if ! ssh_run "$GUEST_IP" "$_G_PORT" "$_G_USER" "$_G_AUTH_MODE" "$_G_AUTH_VAL" "true" >/dev/null 2>&1; then
       util_log_info "  SSH is DOWN after ${_DOWN_ELAPSED}s — reboot confirmed"
       break
     fi
@@ -429,6 +380,12 @@ if [[ "${GUEST_SET_LOCALE:-0}" == "1" ]]; then
   _STEPS+=("locale")
 fi
 
+# --- PHASE 9.5: cloud-init OpenStack config -----------------------------------
+util_log_info "--- Phase 9.5: cloud-init OpenStack config ---"
+_CI_CFG_OUT="$(_gssh "mkdir -p /etc/cloud/cloud.cfg.d && printf 'disable_root: false\nssh_pwauth: true\npreserve_hostname: false\nmanage_etc_hosts: true\ndatasource_list: [OpenStack, None]\n' > /etc/cloud/cloud.cfg.d/99-openstack-imagebuild.cfg && echo cloud-init-config-ok" 2>&1)" || true
+util_log_info "  [cloud-init-config] $_CI_CFG_OUT"
+_STEPS+=("cloud-init-config")
+
 # --- PHASE 10: Disable Auto-Updates ------------------------------------------
 util_log_info "--- Phase 10: Disable Auto-Updates ---"
 if [[ "${GUEST_DISABLE_AUTO_UPDATES:-0}" == "1" && -n "${GUEST_DISABLE_AUTO_UPDATE_UNITS:-}" ]]; then
@@ -437,12 +394,31 @@ if [[ "${GUEST_DISABLE_AUTO_UPDATES:-0}" == "1" && -n "${GUEST_DISABLE_AUTO_UPDA
   _STEPS+=("disable-autoupdate")
 fi
 
+# --- PHASE 10.5: growpart verify ---------------------------------------------
+util_log_info "--- Phase 10.5: growpart verify ---"
+_GP_OUT="$(_gssh "command -v growpart >/dev/null 2>&1 && echo growpart-ok || echo growpart-missing" 2>&1)" || true
+util_log_info "  [growpart] $_GP_OUT"
+if echo "$_GP_OUT" | grep -q "growpart-missing"; then
+  util_log_warn "  growpart not found on guest -- warning only, pipeline continues"
+fi
+_STEPS+=("growpart-verify")
+
 # --- PHASE 11: Disable Firewall ----------------------------------------------
 util_log_info "--- Phase 11: Disable Firewall ---"
 if [[ "${GUEST_DISABLE_FIREWALL:-0}" == "1" && -n "${GUEST_FIREWALL_DISABLE_UNITS:-}" ]]; then
   _FW_OUT="$(_gssh "systemctl disable $GUEST_FIREWALL_DISABLE_UNITS 2>/dev/null || true; systemctl stop $GUEST_FIREWALL_DISABLE_UNITS 2>/dev/null || true; echo firewall-disabled" 2>&1)" || true
   util_log_info "  [firewall] $_FW_OUT"
   _STEPS+=("disable-firewall")
+fi
+
+# --- PHASE 11.5: SELinux relabel ---------------------------------------------
+if [[ "${GUEST_REPO_DRIVER:-apt}" == "dnf-repo" ]]; then
+  util_log_info "--- Phase 11.5: SELinux relabel ---"
+  _SEL_OUT="$(_gssh "if command -v restorecon >/dev/null 2>&1; then restorecon -Rv /etc/ssh/ 2>/dev/null || true; restorecon -Rv /etc/cloud/ 2>/dev/null || true; echo selinux-relabel-ok; else echo selinux-relabel-skipped; fi" 2>&1)" || true
+  util_log_info "  [selinux-relabel] $_SEL_OUT"
+  _STEPS+=("selinux-relabel")
+else
+  util_log_info "--- Phase 11.5: SELinux relabel skipped (not dnf-repo) ---"
 fi
 
 # --- PHASE 12: SSH Root Policy -----------------------------------------------
@@ -453,8 +429,9 @@ _PASSAUTH="${GUEST_SSH_PASSWORD_AUTHENTICATION:-yes}"
 _PUBKEY="${GUEST_SSH_PUBKEY_AUTHENTICATION:-yes}"
 _KBDINT="${GUEST_SSH_KBD_INTERACTIVE_AUTHENTICATION:-no}"
 _SSH_SVC="${GUEST_SSH_SERVICE:-ssh}"
+_SSH_RESTART_TARGET="${GUEST_SSH_RESTART_TARGET:-$_SSH_SVC}"
 _SSH_POL_EXIT=0
-_SSH_POL_OUT="$(_gssh "mkdir -p \$(dirname $_SSHD_DROPIN); printf 'PermitRootLogin $_PERMIT\nPasswordAuthentication $_PASSAUTH\nPubkeyAuthentication $_PUBKEY\nKbdInteractiveAuthentication $_KBDINT\nUsePAM yes\n' > $_SSHD_DROPIN; if sshd -t 2>/dev/null; then systemctl restart $_SSH_SVC 2>/dev/null || true; echo sshd-policy-ok; else echo sshd-config-invalid-dropin-removed; rm -f $_SSHD_DROPIN; fi" 2>&1)" || _SSH_POL_EXIT=$?
+_SSH_POL_OUT="$(_gssh "mkdir -p \$(dirname $_SSHD_DROPIN); printf 'PermitRootLogin $_PERMIT\nPasswordAuthentication $_PASSAUTH\nPubkeyAuthentication $_PUBKEY\nKbdInteractiveAuthentication $_KBDINT\nUsePAM yes\n' > $_SSHD_DROPIN; if sshd -t 2>/dev/null; then systemctl restart $_SSH_RESTART_TARGET 2>/dev/null || systemctl restart $_SSH_SVC 2>/dev/null || true; echo sshd-policy-ok; else echo sshd-config-invalid-dropin-removed; rm -f $_SSHD_DROPIN; fi" 2>&1)" || _SSH_POL_EXIT=$?
 util_log_info "  [ssh-policy] $_SSH_POL_OUT (exit=${_SSH_POL_EXIT})"
 _STEPS+=("ssh-policy")
 
@@ -477,6 +454,9 @@ fi
 CONFIGURED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 _STEPS_JSON="$(printf '"%s",' "${_STEPS[@]}" | sed 's/,$//')"
 
+_VAULT_USED=false
+[[ "$_REPO_MODE_USED" == "vault" ]] && _VAULT_USED=true
+
 STATE_JSON="{
   \"phase\": \"configure\",
   \"os_family\": \"${OS_FAMILY}\",
@@ -484,16 +464,13 @@ STATE_JSON="{
   \"guest_ip\": \"${GUEST_IP}\",
   \"server_id\": \"${SERVER_ID}\",
   \"config_file\": \"config/guest/${OS_FAMILY}/${VERSION}.env\",
-  \"ols_used\": ${_OLS_USED},
-  \"ols_skipped\": ${_OLS_SKIPPED},
   \"reboot_done\": ${_REBOOT_DONE},
   \"repo_mode_used\": \"${_REPO_MODE_USED}\",
   \"repo_mode_reason\": \"${_REPO_MODE_REASON}\",
   \"official_degraded\": ${_OFFICIAL_DEGRADED},
-  \"ols_attempted\": ${_OLS_ATTEMPTED},
-  \"ols_reachable\": ${_OLS_REACHABLE},
   \"vault_attempted\": ${_VAULT_ATTEMPTED},
   \"vault_reachable\": ${_VAULT_REACHABLE},
+  \"vault_used\": ${_VAULT_USED},
   \"steps_completed\": [${_STEPS_JSON}],
   \"status\": \"ok\",
   \"configured_at\": \"${CONFIGURED_AT}\"
