@@ -56,7 +56,7 @@
     - Fedora 42 and 43 used primary releases URL
 
 ## Git / Commit / Push
-- Commit hash: _to be filled after commit_
+- Commit hash: 57050d8
 
 ## Unresolved Items
 - None functionally unresolved for requested scope.
