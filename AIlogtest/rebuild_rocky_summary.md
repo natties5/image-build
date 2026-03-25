@@ -29,7 +29,7 @@ Branch: fix/fresh-clone-and-paths
 
 ## Rocky 9 Result
 - Image: rocky-9-20260323 (84ae39f6-450d-4b1f-92f0-885b7bc0008a)
-- repo_mode_used: official-fallback (OLS + vault both failed → rolled back to official ✅)
+- repo_mode_used: official-fallback (LEGACY_MIRROR + vault both failed → rolled back to official ✅)
 - baseline used dnf: PASS ✅
 - apt-get in baseline: NOT found ✅
 - clean phase: cache/autoremove/history/tmp/logs/machine-id/ssh-host-keys OK

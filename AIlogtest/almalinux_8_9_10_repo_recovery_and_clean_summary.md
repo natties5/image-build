@@ -13,24 +13,24 @@
 1. **Script Hang during DNF:** `configure_guest.sh` was capturing large output from `dnf upgrade` into a variable, causing it to appear hung and eventually timeout.
 2. **CRLF Issues:** Configuration files created/uploaded had Windows line endings, breaking shell execution on the jump host.
 3. **Repo Driver Mismatch:** AlmaLinux path needed explicit `GUEST_REPO_DRIVER=dnf-repo` to avoid silent fallback to `apt`.
-4. **OLS/Vault 404:** OpenLandscape and AlmaLinux Vault mirrors returned 404 for the requested paths.
+4. **LEGACY_MIRROR/Vault 404:** OpenLandscape and AlmaLinux Vault mirrors returned 404 for the requested paths.
 
 ## Root Cause Analysis
 - **Logging Logic:** The script's `_OUT="$(_gssh ...)"` pattern is unsuitable for long-running commands with high-volume output.
 - **Line Endings:** Windows-based environment during file creation.
-- **Mirror Availability:** The specific URLs for OLS/Vault are either incorrect for Alma or currently offline.
+- **Mirror Availability:** The specific URLs for LEGACY_MIRROR/Vault are either incorrect for Alma or currently offline.
 
 ## Files Changed / Created
 1. **config/guest/almalinux/default.env:** Upgraded to full `GUEST_*` schema (DNF-based).
 2. **config/guest/almalinux/8.env, 9.env, 10.env:** Created/Updated with correct version-specific identity and inherited defaults.
 3. **phases/configure_guest.sh:** 
    - Added `_gssh_log` helper to stream output line-by-line to `util_log_info`.
-   - Updated Baseline, OLS, Vault, Update, Upgrade, and Package stages to use streaming logs.
+   - Updated Baseline, LEGACY_MIRROR, Vault, Update, Upgrade, and Package stages to use streaming logs.
    - Fixed CRLF in the script itself.
 
 ## Stages Rerun
 1. **configure_guest:** Rerun for AlmaLinux 8, 9, 10.
-   - All three versions successfully fell back to Official Repos after OLS/Vault 404s.
+   - All three versions successfully fell back to Official Repos after LEGACY_MIRROR/Vault 404s.
    - Full `dnf upgrade` and package installation (`wget`, etc.) completed.
    - Output was streamed successfully, preventing hangs.
 2. **clean_guest:** Rerun for AlmaLinux 8, 9, 10.

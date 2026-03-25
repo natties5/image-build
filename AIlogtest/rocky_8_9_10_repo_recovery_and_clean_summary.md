@@ -27,7 +27,7 @@
 
 ## Stages Rerun
 1. **configure_guest:** Rerun for Rocky 8, 9, 10.
-   - All three versions successfully fell back to Official Repos after OLS/Vault 404s.
+   - All three versions successfully fell back to Official Repos after LEGACY_MIRROR/Vault 404s.
    - Full upgrade and configuration completed.
 2. **clean_guest:** Rerun for Rocky 8, 9, 10.
    - Package cache cleaned.
@@ -45,6 +45,6 @@
 | Rocky 10   | PASS (Official)  | PASS         | SHUTOFF|
 
 ## Remaining Caveats
-- OLS and Vault for Rocky 8/9/10 are currently returning 404 at the expected paths. Pipeline successfully handles this via official fallback.
+- LEGACY_MIRROR and Vault for Rocky 8/9/10 are currently returning 404 at the expected paths. Pipeline successfully handles this via official fallback.
 - Publish stage was intentionally NOT run per instructions.
 

@@ -7,7 +7,7 @@ configure_guest.sh defaulted to apt-get for ALL OS families.
 dnf-family OS (Rocky/AlmaLinux/Fedora) got wrong commands →
 official repo falsely degraded → vault used unnecessarily.
 clean_guest.sh never restored official repo before poweroff →
-final image had vault/OLS repo instead of official.
+final image had vault/LEGACY_MIRROR repo instead of official.
 
 ## Fixes Applied
 | Fix | Location | Before | After |
@@ -23,7 +23,7 @@ final image had vault/OLS repo instead of official.
 After this fix:
 - dnf OS baseline test uses dnf → official repo correctly detected
 - update/upgrade uses correct package manager
-- final image always has official repo (not vault/OLS)
+- final image always has official repo (not vault/LEGACY_MIRROR)
 - ubuntu/debian unaffected
 
 ## Needs Rebuild

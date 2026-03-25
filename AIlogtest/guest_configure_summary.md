@@ -5,12 +5,12 @@ Branch: fix/fresh-clone-and-paths
 ## Config Files Placed
 | File | Path | Fixes Applied |
 |------|------|---------------|
-| ubuntu-24.04.env | config/guest/ubuntu/24.04.env | GUEST_INITIAL_SSH_AS_ROOT=1, GUEST_OLS_SKIP_IF_UNAVAILABLE=1 |
+| ubuntu-24.04.env | config/guest/ubuntu/24.04.env | GUEST_INITIAL_SSH_AS_ROOT=1, GUEST_LEGACY_MIRROR_SKIP_IF_UNAVAILABLE=1 |
 | ubuntu/default.env | config/guest/ubuntu/default.env | copy of 24.04.env |
-| debian-12.env    | config/guest/debian/12.env    | GUEST_NETWORK_STACK=ifupdown (was netplan), GUEST_OLS_SKIP_IF_UNAVAILABLE=1 |
-| rocky-9.env      | config/guest/rocky/9.env      | GUEST_OLS_SKIP_IF_UNAVAILABLE=1 |
-| almalinux-9.env  | config/guest/almalinux/9.env  | GUEST_OLS_SKIP_IF_UNAVAILABLE=1 |
-| fedora-41.env    | config/guest/fedora/41.env    | GUEST_OLS_SKIP_IF_UNAVAILABLE=1 |
+| debian-12.env    | config/guest/debian/12.env    | GUEST_NETWORK_STACK=ifupdown (was netplan), GUEST_LEGACY_MIRROR_SKIP_IF_UNAVAILABLE=1 |
+| rocky-9.env      | config/guest/rocky/9.env      | GUEST_LEGACY_MIRROR_SKIP_IF_UNAVAILABLE=1 |
+| almalinux-9.env  | config/guest/almalinux/9.env  | GUEST_LEGACY_MIRROR_SKIP_IF_UNAVAILABLE=1 |
+| fedora-41.env    | config/guest/fedora/41.env    | GUEST_LEGACY_MIRROR_SKIP_IF_UNAVAILABLE=1 |
 
 ## Pipeline Results (publish skipped)
 | Phase     | Exit | Duration | Status |
@@ -21,7 +21,7 @@ Branch: fix/fresh-clone-and-paths
 | clean     | 0    | 397s     | PASS   |
 
 ## Configure Phase Detail
-- OLS available: YES (OLS was reachable — used)
+- LEGACY_MIRROR available: YES (LEGACY_MIRROR was reachable — used)
 - Reboot completed: YES (SSH back after 15s)
 - Packages installed: qemu-guest-agent (new), liburing2 (dep); cloud-init, sudo, curl, wget, rsync, ca-certificates, cloud-guest-utils already current
 - SSH policy applied: YES (/etc/ssh/sshd_config.d/99-image-build.conf)

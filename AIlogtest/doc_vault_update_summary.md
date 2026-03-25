@@ -19,7 +19,7 @@ Branch: fix/fresh-clone-and-paths
 | config/guest/fedora/default.env | +3 VAULT lines |
 
 ## New Repo Flow
-official → OLS → vault → official-fallback → failed
+official → LEGACY_MIRROR → vault → official-fallback → failed
 
 ## New Config Fields Added
 - GUEST_ENABLE_VAULT_FALLBACK
@@ -30,7 +30,7 @@ official → OLS → vault → official-fallback → failed
 - repo_mode_used
 - repo_mode_reason
 - official_degraded
-- ols_attempted / vault_attempted
+- legacy_mirror_attempted / vault_attempted
 - failure_phase / failure_reason
 
 ## Vault URLs Per OS

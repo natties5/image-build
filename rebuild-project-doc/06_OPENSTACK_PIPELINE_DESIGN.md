@@ -196,7 +196,7 @@
 
 * preflight guest
 * baseline official repo test
-* OLS injection + validation + rollback
+* LEGACY_MIRROR injection + validation + rollback
 * update / upgrade
 * reboot / reconnect
 * kernel cleanup
@@ -1435,8 +1435,8 @@ runtime/state/configure/<os>-<version>.json
     "config_version_file": "config/guest/ubuntu/24.04.env"
   },
   "effective_config": {
-    "OLS_ENABLED": "yes",
-    "OLS_FAILOVER_TO_OFFICIAL": "yes",
+    "LEGACY_MIRROR_ENABLED": "yes",
+    "LEGACY_MIRROR_FAILOVER_TO_OFFICIAL": "yes",
     "TIMEZONE": "Asia/Bangkok",
     "KERNEL_KEEP": "2",
     "DISABLE_AUTO_UPDATES": "yes"
@@ -1452,8 +1452,8 @@ runtime/state/configure/<os>-<version>.json
     "guest_preflight": "ok",
     "baseline_official": "ok",
     "repo_backup": "ok",
-    "ols_injection": "ok",
-    "ols_validation": "ok",
+    "legacy_mirror_injection": "ok",
+    "legacy_mirror_validation": "ok",
     "update_upgrade": "ok",
     "reboot_reconnect": "ok",
     "kernel_cleanup": "ok",
@@ -2489,7 +2489,7 @@ mark_phase_ready publish "$OS_FAMILY" "$VERSION"
 * menu logic
 * path logic
 * config merge logic
-* guest repo/OLS logic
+* guest repo/LEGACY_MIRROR logic
 * locale/timezone/cloud-init logic
 * parsing guest config files
 
@@ -3726,7 +3726,7 @@ pattern นี้ย้ายจาก `publish_one.sh` ตรง ๆ ได้�
 
 * menu logic
 * path logic
-* guest repo/OLS logic
+* guest repo/LEGACY_MIRROR logic
 * locale/timezone/cloud-init config
 * config merge default/version
 * user interaction

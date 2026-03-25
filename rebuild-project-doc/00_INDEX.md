@@ -22,7 +22,7 @@
    ระบบ sync/download image แบบ rule-driven auto-discovery พร้อม dry-run, checksum, state, manifest
 
 3. `03_GUEST_OS_CONFIG_SYSTEM.md`  
-   ระบบ guest config แยกตาม OS/version, OLS failover, final clean, AI-driven config loop
+   ระบบ guest config แยกตาม OS/version, LEGACY_MIRROR failover, final clean, AI-driven config loop
 
 4. `04_ENV_AND_RUNTIME_MODEL.md`  
    อธิบาย `.env`, `.json`, flag files, state directories, runtime output model

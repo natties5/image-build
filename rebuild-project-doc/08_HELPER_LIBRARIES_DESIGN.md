@@ -192,7 +192,7 @@ Recommended meaning:
 ### Not in `openstack_api.sh`
 - menu logic
 - config merge logic
-- guest OLS logic
+- guest LEGACY_MIRROR logic
 - locale/timezone policy
 - file structure/path rules
 

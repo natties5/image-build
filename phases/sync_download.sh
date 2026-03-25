@@ -29,12 +29,14 @@ TRACKED_VERSIONS=""
 DISCOVERY_MODE=""
 LATEST_LOGIC=""
 INDEX_URL_TEMPLATE=""
+INDEX_URL_FALLBACK=""
 CHECKSUM_FILE=""
 HASH_ALGO=""
 ARCH_PRIORITY=""
 FORMAT_PRIORITY=""
 IMAGE_REGEX=""
 CODENAME_MAP=""
+# shellcheck disable=SC2034
 DRY_RUN_SUPPORTED="yes"
 
 # ─── Argument parsing ─────────────────────────────────────────────────────────
@@ -404,41 +406,89 @@ process_version() {
     util_log_info "Skipping ${os_family} ${version}: below min_version floor (${MIN_VERSION})"
     return 0
   fi
-
-  # ── RESOLVE INDEX URL ──────────────────────────────────────────────────────
+  # ?? RESOLVE INDEX URL ??????????????????????????????????????????????????????
   local codename=""
   [[ -n "$CODENAME_MAP" ]] && codename="$(resolve_codename "$version")"
-  local index_url
-  index_url="$(resolve_url_template "$INDEX_URL_TEMPLATE" "$version" "$codename")"
-  util_log_info "Index URL: ${index_url}"
+  local primary_index_url fallback_index_url index_url index_url_source
+  primary_index_url="$(resolve_url_template "$INDEX_URL_TEMPLATE" "$version" "$codename")"
+  index_url="$primary_index_url"
+  index_url_source="primary"
+  util_log_info "Index URL (primary): ${primary_index_url}"
 
-  # ── FETCH CHECKSUM CONTENT ─────────────────────────────────────────────────
-  local checksum_content checksum_source
+  # ?? FETCH CHECKSUM CONTENT (primary -> fallback) ??????????????????????????
+  local checksum_content="" checksum_source="" fetch_ok=false
 
   if [[ "$DISCOVERY_MODE" == "checksum_driven" ]]; then
     checksum_source="${index_url}/${CHECKSUM_FILE}"
-    checksum_content="$(fetch_checksum_content "$index_url" "$CHECKSUM_FILE")" || {
+    checksum_content="$(fetch_checksum_content "$index_url" "$CHECKSUM_FILE" 2>/dev/null)" || true
+    if [[ -n "$checksum_content" ]]; then
+      fetch_ok=true
+    fi
+
+    if [[ "$fetch_ok" != "true" ]] && [[ -n "${INDEX_URL_FALLBACK:-}" ]]; then
+      fallback_index_url="$(resolve_url_template "$INDEX_URL_FALLBACK" "$version" "$codename")"
+      util_log_warn "Primary checksum fetch failed, trying fallback: ${fallback_index_url}"
+      index_url="$fallback_index_url"
+      index_url_source="fallback"
+      checksum_source="${index_url}/${CHECKSUM_FILE}"
+      checksum_content="$(fetch_checksum_content "$index_url" "$CHECKSUM_FILE" 2>/dev/null)" || true
+      [[ -n "$checksum_content" ]] && fetch_ok=true
+    fi
+
+    if [[ "$fetch_ok" != "true" ]]; then
       write_failure "$os_family" "$version" "$mode" \
-        "Failed to fetch checksum file: ${checksum_source}"
+        "Failed to fetch checksum file from primary/fallback for: ${CHECKSUM_FILE}"
       return 1
-    }
+    fi
 
   elif [[ "$DISCOVERY_MODE" == "index_scan" ]]; then
-    checksum_source="$(discover_checksum_url "$index_url" "$CHECKSUM_FILE")" || {
+    checksum_source="$(discover_checksum_url "$index_url" "$CHECKSUM_FILE" 2>/dev/null)" || true
+    if [[ -n "$checksum_source" ]]; then
+      util_log_info "Discovered checksum URL: ${checksum_source}"
+      checksum_content="$(curl "${_CURL_OPTS[@]}" "$checksum_source" 2>/dev/null)" || true
+      [[ -n "$checksum_content" ]] && fetch_ok=true
+    fi
+
+    if [[ "$fetch_ok" != "true" ]] && [[ -n "${INDEX_URL_FALLBACK:-}" ]]; then
+      fallback_index_url="$(resolve_url_template "$INDEX_URL_FALLBACK" "$version" "$codename")"
+      util_log_warn "Primary index-scan failed, trying fallback: ${fallback_index_url}"
+      index_url="$fallback_index_url"
+      index_url_source="fallback"
+      checksum_source="$(discover_checksum_url "$index_url" "$CHECKSUM_FILE" 2>/dev/null)" || true
+      if [[ -n "$checksum_source" ]]; then
+        util_log_info "Discovered checksum URL (fallback): ${checksum_source}"
+        checksum_content="$(curl "${_CURL_OPTS[@]}" "$checksum_source" 2>/dev/null)" || true
+        [[ -n "$checksum_content" ]] && fetch_ok=true
+      fi
+    fi
+
+    if [[ "$fetch_ok" != "true" ]]; then
       write_failure "$os_family" "$version" "$mode" \
-        "Failed to find checksum file via index scan at: ${index_url}"
+        "Failed to find/fetch checksum via index_scan from primary/fallback"
       return 1
-    }
-    util_log_info "Discovered checksum URL: ${checksum_source}"
-    checksum_content="$(curl "${_CURL_OPTS[@]}" "$checksum_source")" || {
-      write_failure "$os_family" "$version" "$mode" \
-        "Failed to fetch discovered checksum: ${checksum_source}"
-      return 1
-    }
+    fi
 
   else
     util_die "Unknown DISCOVERY_MODE: ${DISCOVERY_MODE}"
   fi
+
+  util_log_info "Using index URL source: ${index_url_source} (${index_url})"
+
+  # Normalize hash-only per-file checksum content (e.g. Alpine .sha512)
+  local _single_hash _cs_base _derived_file
+  _single_hash="$(printf '%s' "$checksum_content" | tr -d '\r[:space:]')"
+  if [[ "$_single_hash" =~ ^[a-fA-F0-9]{32,}$ ]]; then
+    _cs_base="${checksum_source##*/}"
+    _derived_file="${_cs_base%.sha256}"
+    _derived_file="${_derived_file%.sha512}"
+    _derived_file="${_derived_file%.SHA256}"
+    _derived_file="${_derived_file%.SHA512}"
+    if [[ -n "$_derived_file" ]] && [[ "$_derived_file" != "$_cs_base" ]]; then
+      checksum_content="${_single_hash}  ${_derived_file}"
+      util_log_info "Derived filename from checksum artifact: ${_derived_file}"
+    fi
+  fi
+
 
   local raw_line_count
   raw_line_count=$(printf '%s\n' "$checksum_content" | wc -l | tr -d ' ')

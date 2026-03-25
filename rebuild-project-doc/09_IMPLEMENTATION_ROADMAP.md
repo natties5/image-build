@@ -35,7 +35,7 @@
 
 ### Milestone 5 — Configure/Clean
 - implement guest configure from new config model
-- implement OLS failover
+- implement LEGACY_MIRROR failover
 - implement final clean
 - implement runtime JSON and flags
 
@@ -103,7 +103,7 @@ The first successful vertical slice should be:
 3. Sync download works for Ubuntu 24.04
 4. Import base image works
 5. Create volume + VM works
-6. Configure guest works with OLS failover
+6. Configure guest works with LEGACY_MIRROR failover
 7. Final clean works
 8. Publish final image works
 9. Cleanup leaves no important resource leak
@@ -132,7 +132,7 @@ The first successful vertical slice should be:
 
 ### Configure
 - default + version config merge works
-- OLS fallback works
+- LEGACY_MIRROR fallback works
 - update/reboot/reconnect works
 - root SSH policy works
 - final validation works

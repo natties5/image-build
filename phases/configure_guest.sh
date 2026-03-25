@@ -107,7 +107,7 @@ _gssh_log() {
   local _tag="$1"
   shift
   _gssh "$@" | while IFS= read -r _line; do util_log_info "  [$_tag] $_line"; done
-  return ${PIPESTATUS[0]}
+  return "${PIPESTATUS[0]}"
 }
 
 _fail() {
@@ -342,7 +342,7 @@ if [[ "${GUEST_REBOOT_AFTER_UPGRADE:-0}" == "1" ]]; then
   _REBOOT_TIMEOUT="${GUEST_REBOOT_TIMEOUT_SEC:-1800}"
   _REBOOT_INTERVAL=15
   _ELAPSED=0
-  util_log_info "  Waiting for SSH to return (timeout ${_REBOOT_TIMEOUT}s)..."
+  util_log_info "  Waiting for SSH to return  (timeout ${_REBOOT_TIMEOUT}s)..."
   while [[ $_ELAPSED -lt $_REBOOT_TIMEOUT ]]; do
     sleep $_REBOOT_INTERVAL
     _ELAPSED=$(( _ELAPSED + _REBOOT_INTERVAL ))

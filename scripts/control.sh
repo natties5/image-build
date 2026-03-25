@@ -75,7 +75,7 @@ Commands:
             current-run           Delete resources from last run
   --help                          Show this help
 
-OS names: ubuntu, debian, fedora, almalinux, rocky
+OS names: ubuntu, debian, fedora, almalinux, rocky, alpine, arch
 
 Examples:
   scripts/control.sh sync dry-run --os ubuntu
@@ -1144,7 +1144,7 @@ menu_sync() {
 
 _menu_sync_all_dry_run() {
   local os
-  for os in ubuntu debian fedora almalinux rocky; do
+  for os in ubuntu debian fedora almalinux rocky alpine arch; do
     echo "  --- discovering: $os ---"
     local disc_out
     disc_out=$(_sync_update_tracked_versions "$os" 2>/dev/null) || disc_out=""
@@ -1156,7 +1156,7 @@ _menu_sync_all_dry_run() {
   done
   echo ""
   echo "  --- running dry-run for all OS ---"
-  for os in ubuntu debian fedora almalinux rocky; do
+  for os in ubuntu debian fedora almalinux rocky alpine arch; do
     echo "  --- dry-run: $os ---"
     bash "${PHASES_DIR}/sync_download.sh" --os "$os" --dry-run || true
   done
@@ -1205,7 +1205,7 @@ _menu_sync_all_download() {
   echo "  Starting download: all OS, all tracked versions"
   echo "  (Ctrl+C to cancel at any time)"
   local os
-  for os in ubuntu debian fedora almalinux rocky; do
+  for os in ubuntu debian fedora almalinux rocky alpine arch; do
     bash "${PHASES_DIR}/sync_download.sh" --os "$os" || true
   done
 }
@@ -1260,7 +1260,7 @@ _menu_sync_show_results() {
 # ─── Build helpers ────────────────────────────────────────────────────────────
 
 _build_select_os() {
-  local os_list="ubuntu debian fedora almalinux rocky"
+  local os_list="ubuntu debian fedora almalinux rocky alpine arch"
   local os ready_vers dryrun_vers label
   local -a display=()
   local -a valid_oses=()
@@ -1622,7 +1622,7 @@ menu_status() {
 }
 
 _status_dashboard() {
-  local os_list="ubuntu debian fedora almalinux rocky"
+  local os_list="ubuntu debian fedora almalinux rocky alpine arch"
   local phases="import create configure clean publish"
 
   echo ""
@@ -1927,7 +1927,7 @@ dispatch_command() {
           # sync dry-run --os <os> --version <v>  → dry-run one version
           if [[ $# -eq 0 ]]; then
             local os
-            for os in ubuntu debian fedora almalinux rocky; do
+            for os in ubuntu debian fedora almalinux rocky alpine arch; do
               echo "  --- dry-run: $os ---"
               bash "${PHASES_DIR}/sync_download.sh" --os "$os" --dry-run || true
             done
@@ -1950,7 +1950,7 @@ dispatch_command() {
           if $_all_flag; then
             echo "  Starting download: all OS, all tracked versions"
             local os
-            for os in ubuntu debian fedora almalinux rocky; do
+            for os in ubuntu debian fedora almalinux rocky alpine arch; do
               bash "${PHASES_DIR}/sync_download.sh" --os "$os" || true
             done
           else

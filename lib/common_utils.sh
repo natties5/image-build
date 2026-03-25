@@ -165,7 +165,7 @@ ssh_wait_ready() {
 # ─── Sync UI helpers ──────────────────────────────────────────────────────────
 # Returns space-separated list of supported OS names
 _sync_list_oses() {
-  echo "ubuntu debian fedora almalinux rocky"
+  echo "ubuntu debian fedora almalinux rocky alpine arch"
 }
 
 # Print numbered OS list, read user choice, echo selected OS name to stdout.
@@ -308,7 +308,7 @@ json_write_file() {
 #   dryrun-only  → only .dryrun-ok exists (not downloaded)
 # Skips entries with neither flag.
 _build_list_ready() {
-  local os_list="ubuntu debian fedora almalinux rocky"
+  local os_list="ubuntu debian fedora almalinux rocky alpine arch"
   local os ver base f status
   for os in $os_list; do
     for f in "${STATE_SYNC_DIR}/${os}"-*.json; do
@@ -471,20 +471,55 @@ _sync_discover_upstream_versions() {
         if printf '%s\n%s\n' "$MIN_VERSION" "$ver" \
             | sort -V | tail -1 | grep -q "^${ver}$" || \
            [[ "$ver" == "$MIN_VERSION" ]]; then
-          # Verify CHECKSUM file exists in archives (sync_download.sh uses archive URL)
+          local fed_primary_url="https://dl.fedoraproject.org/pub/fedora/linux/releases/${ver}/Cloud/x86_64/images/"
+          local fed_primary_html
+          fed_primary_html=$(curl -s --max-time 10 "$fed_primary_url" 2>/dev/null) || fed_primary_html=""
+          if echo "$fed_primary_html" | grep -qE 'Fedora-Cloud-[0-9]+-[0-9.]+-x86_64-CHECKSUM'; then
+            versions+=("$ver")
+            continue
+          fi
           local fed_archive_url="https://archives.fedoraproject.org/pub/archive/fedora/linux/releases/${ver}/Cloud/x86_64/images/"
           local fed_arch_html
           fed_arch_html=$(curl -s --max-time 10 "$fed_archive_url" 2>/dev/null) || fed_arch_html=""
-          if ! echo "$fed_arch_html" | grep -qE 'Fedora-Cloud-[0-9]+-[0-9.]+-x86_64-CHECKSUM'; then
-            continue  # skip — not in archives yet or no CHECKSUM found
+          if echo "$fed_arch_html" | grep -qE 'Fedora-Cloud-[0-9]+-[0-9.]+-x86_64-CHECKSUM'; then
+            versions+=("$ver")
+            continue
           fi
-          versions+=("$ver")
         fi
       done < <(echo "$html" \
         | grep -oE 'href="[0-9]+/"' \
         | sed 's|href="||;s|/"||' \
         | sort -uV)
       ;;
+
+    alpine)
+      # Scan https://dl-cdn.alpinelinux.org/alpine/
+      base_url="https://dl-cdn.alpinelinux.org/alpine/"
+      local html
+      html=$(curl -s --max-time 15 "$base_url" 2>/dev/null) || return 1
+      while IFS= read -r ver; do
+        [[ -z "$ver" ]] && continue
+        if printf '%s\n%s\n' "$MIN_VERSION" "$ver" \
+            | sort -V | tail -1 | grep -q "^${ver}$" || \
+           [[ "$ver" == "$MIN_VERSION" ]]; then
+          local alpine_cloud_url="https://dl-cdn.alpinelinux.org/alpine/v${ver}/releases/cloud/"
+          local alpine_cloud_html
+          alpine_cloud_html=$(curl -s --max-time 10 "$alpine_cloud_url" 2>/dev/null) || alpine_cloud_html=""
+          if echo "$alpine_cloud_html" | grep -qE 'generic_alpine-.*-x86_64-bios-cloudinit-r[0-9]+\.qcow2'; then
+            versions+=("$ver")
+            continue
+          fi
+        fi
+      done < <(echo "$html" \
+        | grep -oE 'href="v3\.[0-9]+/"' \
+        | sed 's|href="v||;s|/"||' \
+        | sort -uV)
+      ;;
+
+    arch)
+      versions+=("latest")
+      ;;
+
 
     *)
       return 1

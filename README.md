@@ -49,6 +49,8 @@ bash scripts/control.sh status dashboard
 | fedora     | 41          | ✓    | -      | -         | -       |
 | almalinux  | 8           | ✓    | -      | -         | -       |
 | rocky      | 8           | ✓    | -      | -         | -       |
+| alpine    | 3.21        | ✓    | -      | -         | -       |
+| arch      | latest      | ✓    | -      | -         | -       |
 
 ---
 

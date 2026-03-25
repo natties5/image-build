@@ -86,12 +86,6 @@ _gssh() {
 }
 
 # --- Clean steps --------------------------------------------------------------
-if [[ "${GUEST_CLEAN_PACKAGE_CACHE:-0}" == "1" ]]; then
-  util_log_info "Cleaning package cache..."
-  _CC_CMD="${GUEST_CLEAN_CACHE_COMMAND:-apt-get clean}"
-  _CC_OUT="$(_gssh "$_CC_CMD" 2>&1)" || true
-  while IFS= read -r _line; do util_log_info "  [clean-cache] $_line"; done <<< "$_CC_OUT"
-fi
 
 if [[ -n "${GUEST_AUTOREMOVE_COMMAND:-}" ]]; then
   util_log_info "Running autoremove..."
@@ -206,7 +200,7 @@ STATE_JSON="{
   \"version\": \"${VERSION}\",
   \"server_id\": \"${SERVER_ID}\",
   \"guest_ip\": \"${GUEST_IP}\",
-  \"steps_completed\": [\"cache\",\"autoremove\",\"history\",\"tmp\",\"logs\",\"machine-id\",\"ssh-host-keys\",\"cloud-init-clean\",\"fstrim\",\"shutdown\"],
+  \"steps_completed\": [\"autoremove\",\"history\",\"tmp\",\"logs\",\"machine-id\",\"ssh-host-keys\",\"cloud-init-clean\",\"fstrim\",\"shutdown\"],
   \"status\": \"shutoff\",
   \"cleaned_at\": \"${CLEANED_AT}\"
 }"

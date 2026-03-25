@@ -50,7 +50,7 @@ SSH_PRIVATE_KEY=""
 SSH_PASSWORD=""
 ROOT_PASSWORD=""
 
-OLS_BASE_URL="http://mirrors.openlandscape.cloud/ubuntu"
+LEGACY_MIRROR_BASE_URL="http://mirrors.openlandscape.cloud/ubuntu"
 OLD_RELEASES_URL="http://old-releases.ubuntu.com/ubuntu"
 OFFICIAL_ARCHIVE_URL="http://archive.ubuntu.com/ubuntu"
 OFFICIAL_SECURITY_URL="http://security.ubuntu.com/ubuntu"
@@ -359,14 +359,14 @@ backup_apt_sources() {
 
 choose_repo_mode() {
   local suite="$UBUNTU_CODENAME"
-  local ols_ok="yes"
+  local legacy_mirror_ok="yes"
   for pocket in "$suite" "$suite-updates" "$suite-security" "$suite-backports"; do
-    if ! check_url "$OLS_BASE_URL/dists/$pocket/InRelease" && ! check_url "$OLS_BASE_URL/dists/$pocket/Release"; then
-      ols_ok="no"
+    if ! check_url "$LEGACY_MIRROR_BASE_URL/dists/$pocket/InRelease" && ! check_url "$LEGACY_MIRROR_BASE_URL/dists/$pocket/Release"; then
+      legacy_mirror_ok="no"
       break
     fi
   done
-  if [[ "$ols_ok" == "yes" ]]; then
+  if [[ "$legacy_mirror_ok" == "yes" ]]; then
     REPO_MODE="ols"
   else
     case "$UBUNTU_VERSION_ID" in
@@ -387,15 +387,15 @@ write_apt_sources() {
   find /etc/apt/sources.list.d -maxdepth 1 -type f \( -name '*.list' -o -name '*.sources' \) -delete
   case "$REPO_MODE" in
     ols)
-      cat > /etc/apt/sources.list <<EOF_OLS
-# primary: OLS
+      cat > /etc/apt/sources.list <<EOF_LEGACY_MIRROR
+# primary: LEGACY_MIRROR
 # fallback: handled by script if apt update fails
 
-deb $OLS_BASE_URL $suite main restricted universe multiverse
-deb $OLS_BASE_URL $suite-updates main restricted universe multiverse
-deb $OLS_BASE_URL $suite-security main restricted universe multiverse
-deb $OLS_BASE_URL $suite-backports main restricted universe multiverse
-EOF_OLS
+deb $LEGACY_MIRROR_BASE_URL $suite main restricted universe multiverse
+deb $LEGACY_MIRROR_BASE_URL $suite-updates main restricted universe multiverse
+deb $LEGACY_MIRROR_BASE_URL $suite-security main restricted universe multiverse
+deb $LEGACY_MIRROR_BASE_URL $suite-backports main restricted universe multiverse
+EOF_LEGACY_MIRROR
       ;;
     old-releases)
       cat > /etc/apt/sources.list <<EOF_OLD
@@ -763,7 +763,7 @@ remote_env_prefix=$(cat <<EOFV
 REMOTE_LOG_PATH='$REMOTE_LOG' \
 BACKUP_DIR='$REMOTE_BACKUP_DIR' \
 WAIT_CLOUD_INIT='$WAIT_CLOUD_INIT' \
-OLS_BASE_URL='$OLS_BASE_URL' \
+LEGACY_MIRROR_BASE_URL='$LEGACY_MIRROR_BASE_URL' \
 OLD_RELEASES_URL='$OLD_RELEASES_URL' \
 OFFICIAL_ARCHIVE_URL='$OFFICIAL_ARCHIVE_URL' \
 OFFICIAL_SECURITY_URL='$OFFICIAL_SECURITY_URL' \

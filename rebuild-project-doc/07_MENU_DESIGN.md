@@ -541,7 +541,7 @@ logic ที่ควรเช็ก:
 
 * เข้า guest
 * baseline official repo
-* OLS failover
+* LEGACY_MIRROR failover
 * update/upgrade
 * root SSH policy
 * locale/timezone/cloud-init policy

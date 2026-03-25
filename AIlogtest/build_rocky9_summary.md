@@ -21,8 +21,8 @@ Working tree: clean
 
 ## configure_guest.sh RHEL Fixes Applied
 1. PHASE 4 — Repo Backup: added dnf-repo branch (backs up /etc/yum.repos.d/*.repo)
-2. PHASE 5 — OLS Injection: added dnf-repo branch (disables mirrorlist/metalink, enables baseurl)
-            OLS Rollback: added dnf-repo branch (restores .repo + dnf clean + makecache)
+2. PHASE 5 — LEGACY_MIRROR Injection: added dnf-repo branch (disables mirrorlist/metalink, enables baseurl)
+            LEGACY_MIRROR Rollback: added dnf-repo branch (restores .repo + dnf clean + makecache)
 3. PHASE 9 — Locale: added localectl branch (uses GUEST_LOCALE_METHOD=localectl for RHEL)
 
 ## Pipeline Result
@@ -41,7 +41,7 @@ Status: active
 
 ## RHEL-specific Notes
 - dnf support: ADDED (3 fixes to configure_guest.sh)
-- OLS injection: injected via dnf-repo driver — validation failed (404 on rocky path) → rolled back to official repo correctly
+- LEGACY_MIRROR injection: injected via dnf-repo driver — validation failed (404 on rocky path) → rolled back to official repo correctly
 - sshd service restart: OK (GUEST_SSH_SERVICE=sshd read from 9.env)
 - Locale via localectl: OK (GUEST_LOCALE_METHOD=localectl read from 9.env)
 - Firewall (firewalld) disabled: OK
@@ -55,6 +55,6 @@ Base img : none (deleted in publish_final)
 
 ## Notes / Minor Issues
 1. configure_guest Phase 3 (Baseline Repo): DNS resolve warning (dns-warn) — non-fatal, direct IP connectivity OK
-2. configure_guest Phase 5 (OLS): OLS reachable but Rocky path returns 404 (/pub/rocky/9/...) → correct rollback to official repo
+2. configure_guest Phase 5 (LEGACY_MIRROR): LEGACY_MIRROR reachable but Rocky path returns 404 (/pub/rocky/9/...) → correct rollback to official repo
 3. clean_guest: cloud-init clean + fstrim got connection reset (expected — SSH host keys removed before shutdown)
 4. clean_guest: openstack API stop worked cleanly (SHUTOFF in ~14s)

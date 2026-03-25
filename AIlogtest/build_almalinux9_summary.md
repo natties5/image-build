@@ -27,18 +27,18 @@ ID    : 781a60aa-1ca2-443e-8693-b047eb6ea416
 Status: active
 
 ## AlmaLinux-specific Notes
-- repo baseurl pattern: FIXED — added almalinux OLS injection patterns to configure_guest.sh
-- OLS injection: attempted, validation failed (OLS mirror has no AlmaLinux path) → rolled back correctly
+- repo baseurl pattern: FIXED — added almalinux LEGACY_MIRROR injection patterns to configure_guest.sh
+- LEGACY_MIRROR injection: attempted, validation failed (LEGACY_MIRROR mirror has no AlmaLinux path) → rolled back correctly
 - vault attempted: YES — validation failed (Cannot find valid baseurl for appstream) → rolled back
-- official fallback: OK — used as final repo (all 3: OLS + vault + official-fallback)
-- repo_mode_used: official-fallback / reason: ols_and_vault_failed_official_ok
+- official fallback: OK — used as final repo (all 3: LEGACY_MIRROR + vault + official-fallback)
+- repo_mode_used: official-fallback / reason: legacy_mirror_and_vault_failed_official_ok
 - sshd service: OK
 - Locale via localectl: OK
 - Firewall (firewalld) disabled: OK
 - Auto-update timers disabled: OK
 
 ## Bugs Found & Fixed
-1. configure_guest.sh line 195 — OLS injection (dnf-repo branch) was missing AlmaLinux baseurl patterns
+1. configure_guest.sh line 195 — LEGACY_MIRROR injection (dnf-repo branch) was missing AlmaLinux baseurl patterns
    Before: only had  and 
    Fixed : added  and
             patterns

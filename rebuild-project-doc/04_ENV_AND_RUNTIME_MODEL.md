@@ -170,7 +170,7 @@ runtime/logs/configure/<os>-<version>.log
 * disable MOTD
 * firewall policy
 * DNS policy
-* OLS fallback policy
+* LEGACY_MIRROR fallback policy
 * final clean policy
 
 ## `<version>.env`
@@ -181,7 +181,7 @@ runtime/logs/configure/<os>-<version>.log
 * suites
 * repo layout
 * ใช้ `sources.list` หรือ `.sources`
-* OLS path ของ version นี้
+* LEGACY_MIRROR path ของ version นี้
 * workaround เฉพาะรุ่น
 * behavior ของ package manager ที่ต่างจากรุ่นอื่น
 
@@ -251,19 +251,19 @@ runtime/logs/configure/<os>-<version>.log
 
   * `*.repo`
 
-## Phase 4 — OLS Mirror Injection
+## Phase 4 — LEGACY_MIRROR Mirror Injection
 
-* เปลี่ยน official → OLS
+* เปลี่ยน official → LEGACY_MIRROR
 * Ubuntu/Debian รองรับทั้ง classic และ deb822 `.sources`
 * RHEL family ปิด mirrorlist และตั้ง baseurl
 
-## Phase 5 — OLS Validation
+## Phase 5 — LEGACY_MIRROR Validation
 
 * clean cache
 * test package metadata/update ใหม่
-* ถ้าผ่าน ใช้ OLS ต่อ
+* ถ้าผ่าน ใช้ LEGACY_MIRROR ต่อ
 
-## Phase 6 — Rollback to Official on OLS Failure
+## Phase 6 — Rollback to Official on LEGACY_MIRROR Failure
 
 * restore backup
 * clear cache
