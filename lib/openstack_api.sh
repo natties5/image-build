@@ -73,6 +73,50 @@ os_list_floating_networks(){ openstack_cmd network list --external -f value -c N
 
 # ─── Image operations ─────────────────────────────────────────────────────────
 
+os_validate_disk_format() {
+  local format="${1:-}" context="${2:-disk format}"
+  case "$format" in
+    qcow2|raw) ;;
+    "")
+      util_log_error "${context} is empty"
+      return 1
+      ;;
+    *)
+      util_log_error "Unsupported ${context}: ${format}. Supported formats: qcow2 raw"
+      return 1
+      ;;
+  esac
+}
+
+os_detect_local_image_disk_format() {
+  local path="${1:-}"
+  if [[ -z "$path" ]]; then
+    util_log_error "os_detect_local_image_disk_format: image path is required"
+    return 1
+  fi
+  if [[ ! -f "$path" ]]; then
+    util_log_error "Source image file not found: $path"
+    return 1
+  fi
+  if ! command -v qemu-img >/dev/null 2>&1; then
+    util_log_error "Required command not found: qemu-img (needed to detect source image disk format)"
+    return 1
+  fi
+
+  local detected_format=""
+  detected_format="$(
+    qemu-img info "$path" 2>/dev/null \
+      | awk -F': ' '/^file format:/ {print $2; exit}'
+  )"
+  if [[ -z "$detected_format" ]]; then
+    util_log_error "Could not parse disk format from qemu-img info output for: $path"
+    return 1
+  fi
+
+  os_validate_disk_format "$detected_format" "source image disk format" || return 1
+  printf '%s\n' "$detected_format"
+}
+
 # Find image ID by exact name — returns empty string if not found
 # Usage: os_find_image_id_by_name <name>
 os_find_image_id_by_name() {
@@ -93,12 +137,13 @@ os_get_image_status() {
 }
 
 # Create base image from a local file
-# Usage: os_create_base_image <image_name> <local_path> <os_distro> <os_version> <visibility>
+# Usage: os_create_base_image <image_name> <local_path> <disk_format> <os_distro> <os_version> <visibility>
 os_create_base_image() {
-  local name="$1" path="$2" distro="$3" ver="$4" visibility="${5:-private}"
-  util_log_info "Creating base image: $name from $path"
+  local name="$1" path="$2" disk_format="$3" distro="$4" ver="$5" visibility="${6:-private}"
+  os_validate_disk_format "$disk_format" "base image disk format" || return 1
+  util_log_info "Creating base image: $name from $path (disk_format=$disk_format)"
   openstack_cmd image create \
-    --disk-format qcow2 \
+    --disk-format "$disk_format" \
     --container-format bare \
     --file "$path" \
     --property os_distro="$distro" \
@@ -366,13 +411,14 @@ os_attach_floating_ip() {
 # Note: --property and --private are not supported with --volume on most OpenStack versions.
 # The -c id output from image create --volume may return the volume ID instead of image ID.
 # We trigger the upload, then search Glance by name to get the real image ID.
-# Usage: os_upload_volume_to_image <volume_id> <image_name> <os_distro> <os_version>
+# Usage: os_upload_volume_to_image <volume_id> <image_name> <disk_format> <os_distro> <os_version>
 os_upload_volume_to_image() {
-  local vol_id="$1" name="$2" distro="$3" ver="$4"
-  util_log_info "Uploading volume $vol_id as image: $name"
+  local vol_id="$1" name="$2" disk_format="$3" distro="$4" ver="$5"
+  os_validate_disk_format "$disk_format" "final image disk format policy" || return 1
+  util_log_info "Uploading volume $vol_id as image: $name (disk_format=$disk_format)"
   # Trigger the upload (ignore stdout — returned id may be volume id, not image id)
   openstack_cmd image create \
-    --disk-format qcow2 \
+    --disk-format "$disk_format" \
     --container-format bare \
     --volume "$vol_id" \
     "$name" >/dev/null 2>&1 || true

@@ -40,6 +40,35 @@ else
   util_log_warn "openrc not found: $OPENRC_FILE"
 fi
 
+# ─── Load publish policy config ───────────────────────────────────────────────
+PUBLISH_POLICY_FILE="${CONFIG_DIR}/pipeline/publish.env"
+if [[ -f "$PUBLISH_POLICY_FILE" ]]; then
+  # shellcheck disable=SC1090
+  source "$PUBLISH_POLICY_FILE"
+  util_log_info "Loaded publish policy config: $PUBLISH_POLICY_FILE"
+else
+  util_log_warn "Publish policy config not found: $PUBLISH_POLICY_FILE"
+fi
+
+LEGACY_PUBLISH_POLICY_FILE="${ROOT_DIR}/deploy/local/publish.env"
+if [[ -f "$LEGACY_PUBLISH_POLICY_FILE" ]]; then
+  # shellcheck disable=SC1090
+  source "$LEGACY_PUBLISH_POLICY_FILE"
+  util_log_info "Loaded publish policy override: $LEGACY_PUBLISH_POLICY_FILE"
+fi
+
+FINAL_IMAGE_DISK_FORMAT="${FINAL_IMAGE_DISK_FORMAT:-${FINAL_DISK_FORMAT:-}}"
+if [[ -z "$FINAL_IMAGE_DISK_FORMAT" ]]; then
+  util_log_error "Final image disk format policy is not configured. Set FINAL_IMAGE_DISK_FORMAT in ${PUBLISH_POLICY_FILE}"
+  state_mark_failed "$PHASE" "$OS_FAMILY" "$VERSION"
+  exit 1
+fi
+if ! os_validate_disk_format "$FINAL_IMAGE_DISK_FORMAT" "final image disk format policy"; then
+  state_mark_failed "$PHASE" "$OS_FAMILY" "$VERSION"
+  exit 1
+fi
+util_log_info "Final image disk format policy: $FINAL_IMAGE_DISK_FORMAT"
+
 # ─── Read create state JSON ───────────────────────────────────────────────────
 if ! state_is_ready "create" "$OS_FAMILY" "$VERSION"; then
   util_log_error "Create phase is not ready — run create_vm.sh first"
@@ -108,8 +137,8 @@ fi
 
 # ─── Upload volume to image ───────────────────────────────────────────────────
 if [[ -z "$FINAL_IMAGE_ID" ]]; then
-  util_log_info "Uploading volume $VOLUME_ID as final image: $FINAL_IMAGE_NAME ..."
-  UPLOAD_ID="$(os_upload_volume_to_image "$VOLUME_ID" "$FINAL_IMAGE_NAME" "$OS_FAMILY" "$VERSION")"
+  util_log_info "Uploading volume $VOLUME_ID as final image: $FINAL_IMAGE_NAME (disk_format=$FINAL_IMAGE_DISK_FORMAT) ..."
+  UPLOAD_ID="$(os_upload_volume_to_image "$VOLUME_ID" "$FINAL_IMAGE_NAME" "$FINAL_IMAGE_DISK_FORMAT" "$OS_FAMILY" "$VERSION")"
 
   if [[ -z "$UPLOAD_ID" ]]; then
     util_log_info "Upload command returned empty ID — polling Glance for image..."
@@ -190,6 +219,7 @@ STATE_JSON="$(cat <<EOF
   "final_image_name": "${FINAL_IMAGE_NAME}",
   "final_image_id": "${FINAL_IMAGE_ID}",
   "final_image_status": "active",
+  "final_image_disk_format": "${FINAL_IMAGE_DISK_FORMAT}",
   "server_deleted": ${SERVER_DELETED},
   "volume_deleted": ${VOLUME_DELETED},
   "base_image_deleted": ${BASE_IMAGE_DELETED},

@@ -48,6 +48,7 @@ if [[ ! -f "$SYNC_JSON" ]]; then
 fi
 
 FILENAME="$(state_read_json_field "sync" "$OS_FAMILY" "$VERSION" "filename")"
+SYNC_FORMAT_SELECTED="$(state_read_json_field "sync" "$OS_FAMILY" "$VERSION" "format_selected" 2>/dev/null || echo '')"
 if [[ -z "$FILENAME" ]]; then
   util_log_error "Cannot read filename from sync JSON: $SYNC_JSON"
   state_mark_failed "$PHASE" "$OS_FAMILY" "$VERSION"
@@ -65,6 +66,14 @@ if [[ ! -f "$IMAGE_PATH" ]]; then
   exit 1
 fi
 util_log_info "Image file found: $(du -h "$IMAGE_PATH" | cut -f1) — $IMAGE_PATH"
+
+# ─── Detect actual source disk format ─────────────────────────────────────────
+if ! DETECTED_DISK_FORMAT="$(os_detect_local_image_disk_format "$IMAGE_PATH")"; then
+  util_log_error "Failed to detect source image disk format for: $IMAGE_PATH"
+  state_mark_failed "$PHASE" "$OS_FAMILY" "$VERSION"
+  exit 1
+fi
+util_log_info "Detected source image disk format: $DETECTED_DISK_FORMAT"
 
 # ─── Define base image name ───────────────────────────────────────────────────
 BASE_IMAGE_NAME="base-${OS_FAMILY}-${VERSION}"
@@ -88,6 +97,8 @@ if [[ -n "$EXISTING_ID" ]]; then
   "base_image_name": "${BASE_IMAGE_NAME}",
   "base_image_id": "${EXISTING_ID}",
   "status": "skipped-exists",
+  "sync_format_selected": "${SYNC_FORMAT_SELECTED}",
+  "detected_disk_format": "${DETECTED_DISK_FORMAT}",
   "workspace_path": "${IMAGE_PATH}",
   "imported_at": "${IMPORTED_AT}"
 }
@@ -106,7 +117,7 @@ fi
 
 # ─── Import image ─────────────────────────────────────────────────────────────
 util_log_info "Importing image: $BASE_IMAGE_NAME ..."
-BASE_IMAGE_ID="$(os_create_base_image "$BASE_IMAGE_NAME" "$IMAGE_PATH" "$OS_FAMILY" "$VERSION" "private")"
+BASE_IMAGE_ID="$(os_create_base_image "$BASE_IMAGE_NAME" "$IMAGE_PATH" "$DETECTED_DISK_FORMAT" "$OS_FAMILY" "$VERSION" "private")"
 
 if [[ -z "$BASE_IMAGE_ID" ]]; then
   util_log_error "image create returned empty ID — checking if image was created anyway..."
@@ -140,6 +151,8 @@ STATE_JSON="$(cat <<EOF
   "base_image_name": "${BASE_IMAGE_NAME}",
   "base_image_id": "${BASE_IMAGE_ID}",
   "status": "active",
+  "sync_format_selected": "${SYNC_FORMAT_SELECTED}",
+  "detected_disk_format": "${DETECTED_DISK_FORMAT}",
   "workspace_path": "${IMAGE_PATH}",
   "imported_at": "${IMPORTED_AT}"
 }
