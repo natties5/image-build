@@ -424,14 +424,31 @@ fi
 # --- PHASE 12: SSH Root Policy -----------------------------------------------
 util_log_info "--- Phase 12: SSH Root Policy ---"
 _SSHD_DROPIN="${GUEST_SSHD_DROPIN_FILE:-/etc/ssh/sshd_config.d/99-image-build.conf}"
-_PERMIT="${GUEST_SSH_PERMIT_ROOT_LOGIN:-yes}"
-_PASSAUTH="${GUEST_SSH_PASSWORD_AUTHENTICATION:-yes}"
-_PUBKEY="${GUEST_SSH_PUBKEY_AUTHENTICATION:-yes}"
-_KBDINT="${GUEST_SSH_KBD_INTERACTIVE_AUTHENTICATION:-no}"
+
+# Master switch: if ENABLE_ROOT_SSH=no, force PermitRootLogin=no
+if [[ "${ENABLE_ROOT_SSH:-yes}" == "no" ]]; then
+  _PERMIT="no"
+  _PASSAUTH="no"
+  _PUBKEY="no"
+  util_log_info "  [ssh-policy] Root SSH disabled by ENABLE_ROOT_SSH=no"
+else
+  _PERMIT="${SSH_PERMIT_ROOT_LOGIN:-yes}"
+  _PASSAUTH="${SSH_PASSWORD_AUTH:-yes}"
+  _PUBKEY="${SSH_PUBKEY_AUTH:-yes}"
+fi
+_KBDINT="${SSH_KBD_INTERACTIVE_AUTH:-no}"
 _SSH_SVC="${GUEST_SSH_SERVICE:-ssh}"
 _SSH_RESTART_TARGET="${GUEST_SSH_RESTART_TARGET:-$_SSH_SVC}"
+
+# Inject ROOT_AUTHORIZED_KEY if provided
+_SSH_AUTH_KEY_INJECT=""
+if [[ -n "${ROOT_AUTHORIZED_KEY:-}" ]]; then
+  _SSH_AUTH_KEY_INJECT="mkdir -p /root/.ssh && chmod 700 /root/.ssh && echo '${ROOT_AUTHORIZED_KEY}' > /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && "
+  util_log_info "  [ssh-key] Injecting authorized key for root"
+fi
+
 _SSH_POL_EXIT=0
-_SSH_POL_OUT="$(_gssh "mkdir -p \$(dirname $_SSHD_DROPIN); printf 'PermitRootLogin $_PERMIT\nPasswordAuthentication $_PASSAUTH\nPubkeyAuthentication $_PUBKEY\nKbdInteractiveAuthentication $_KBDINT\nUsePAM yes\n' > $_SSHD_DROPIN; if sshd -t 2>/dev/null; then systemctl restart $_SSH_RESTART_TARGET 2>/dev/null || systemctl restart $_SSH_SVC 2>/dev/null || true; echo sshd-policy-ok; else echo sshd-config-invalid-dropin-removed; rm -f $_SSHD_DROPIN; fi" 2>&1)" || _SSH_POL_EXIT=$?
+_SSH_POL_OUT="$(_gssh "${_SSH_AUTH_KEY_INJECT}mkdir -p \$(dirname $_SSHD_DROPIN); printf 'PermitRootLogin $_PERMIT\nPasswordAuthentication $_PASSAUTH\nPubkeyAuthentication $_PUBKEY\nKbdInteractiveAuthentication $_KBDINT\nUsePAM yes\n' > $_SSHD_DROPIN; if sshd -t 2>/dev/null; then systemctl restart $_SSH_RESTART_TARGET 2>/dev/null || systemctl restart $_SSH_SVC 2>/dev/null || true; echo sshd-policy-ok; else echo sshd-config-invalid-dropin-removed; rm -f $_SSHD_DROPIN; fi" 2>&1)" || _SSH_POL_EXIT=$?
 util_log_info "  [ssh-policy] $_SSH_POL_OUT (exit=${_SSH_POL_EXIT})"
 _STEPS+=("ssh-policy")
 
