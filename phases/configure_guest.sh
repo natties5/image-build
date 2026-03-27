@@ -167,18 +167,26 @@ else
 fi
 _STEPS+=("baseline-repo")
 
-# --- PHASE 4: Repo Backup ----------------------------------------------------
-util_log_info "--- Phase 4: Repo Backup ---"
-_BACKUP_DIR="${GUEST_REPO_BACKUP_DIR:-/var/backups/image-build/repos}"
-_BACKUP_EXIT=0
-_REPO_DRIVER="${GUEST_REPO_DRIVER:-apt}"
-if [[ "$_REPO_DRIVER" == "dnf-repo" ]]; then
-  _BACKUP_OUT="$(_gssh "mkdir -p $_BACKUP_DIR; cp /etc/yum.repos.d/*.repo $_BACKUP_DIR/ 2>/dev/null || true; echo backup-ok" 2>&1)" || _BACKUP_EXIT=$?
+# --- PHASE 4: Repo Backup (only if official degraded) -----------------------
+if [[ "$_OFFICIAL_DEGRADED" == "true" ]]; then
+  util_log_info "--- Phase 4: Repo Backup ---"
+  _BACKUP_DIR="${GUEST_REPO_BACKUP_DIR:-/var/backups/image-build/repos}"
+  _BACKUP_EXIT=0
+  _REPO_DRIVER="${GUEST_REPO_DRIVER:-apt}"
+  if [[ "$_REPO_DRIVER" == "dnf-repo" ]]; then
+    _BACKUP_OUT="$(_gssh "mkdir -p $_BACKUP_DIR; cp /etc/yum.repos.d/*.repo $_BACKUP_DIR/ 2>/dev/null || true; echo backup-ok" 2>&1)" || _BACKUP_EXIT=$?
+  elif [[ "$_REPO_DRIVER" == "apk" ]]; then
+    _BACKUP_OUT="$(_gssh "mkdir -p $_BACKUP_DIR; cp /etc/apk/repositories $_BACKUP_DIR/ 2>/dev/null || true; echo backup-ok" 2>&1)" || _BACKUP_EXIT=$?
+  elif [[ "$_REPO_DRIVER" == "pacman" ]]; then
+    _BACKUP_OUT="$(_gssh "mkdir -p $_BACKUP_DIR; cp /etc/pacman.d/mirrorlist $_BACKUP_DIR/ 2>/dev/null || true; echo backup-ok" 2>&1)" || _BACKUP_EXIT=$?
+  else
+    _BACKUP_OUT="$(_gssh "mkdir -p $_BACKUP_DIR; cp /etc/apt/sources.list $_BACKUP_DIR/ 2>/dev/null || true; cp /etc/apt/sources.list.d/*.list $_BACKUP_DIR/ 2>/dev/null || true; cp /etc/apt/sources.list.d/*.sources $_BACKUP_DIR/ 2>/dev/null || true; echo backup-ok" 2>&1)" || _BACKUP_EXIT=$?
+  fi
+  util_log_info "  [backup] $_BACKUP_OUT (exit=${_BACKUP_EXIT})"
+  _STEPS+=("repo-backup")
 else
-  _BACKUP_OUT="$(_gssh "mkdir -p $_BACKUP_DIR; cp /etc/apt/sources.list $_BACKUP_DIR/ 2>/dev/null || true; cp /etc/apt/sources.list.d/*.list $_BACKUP_DIR/ 2>/dev/null || true; cp /etc/apt/sources.list.d/*.sources $_BACKUP_DIR/ 2>/dev/null || true; echo backup-ok" 2>&1)" || _BACKUP_EXIT=$?
+  util_log_info "--- Phase 4: Repo Backup skipped (official repo OK) ---"
 fi
-util_log_info "  [backup] $_BACKUP_OUT (exit=${_BACKUP_EXIT})"
-_STEPS+=("repo-backup")
 
 # --- PHASE 5: Repo Selection (official → vault → official-fallback) ----------
 util_log_info "--- Phase 5: Repo Selection ---"
@@ -186,6 +194,10 @@ util_log_info "--- Phase 5: Repo Selection ---"
 # STEP 1: test official repo
 if [[ "${GUEST_REPO_DRIVER:-apt}" == "dnf-repo" ]]; then
   _OFFICIAL_CMD="${GUEST_REPO_BASELINE_UPDATE_COMMAND:-dnf clean all && dnf -y makecache}"
+elif [[ "${GUEST_REPO_DRIVER:-apt}" == "apk" ]]; then
+  _OFFICIAL_CMD="${GUEST_REPO_BASELINE_UPDATE_COMMAND:-apk update}"
+elif [[ "${GUEST_REPO_DRIVER:-apt}" == "pacman" ]]; then
+  _OFFICIAL_CMD="${GUEST_REPO_BASELINE_UPDATE_COMMAND:-pacman -Sy --noconfirm}"
 else
   _OFFICIAL_CMD="${GUEST_REPO_BASELINE_UPDATE_COMMAND:-apt-get update}"
 fi
@@ -219,6 +231,10 @@ if [[ "$_OFFICIAL_DEGRADED" == "true" ]] && \
     # Inject vault URL into repo files
     if [[ "${GUEST_REPO_DRIVER:-apt}" == "dnf-repo" ]]; then
       _VINJ_OUT="$(_gssh "for f in /etc/yum.repos.d/*.repo; do [ -f \"\$f\" ] || continue; sed -i 's|^mirrorlist=|#mirrorlist=|g' \"\$f\" 2>/dev/null || true; sed -i 's|^metalink=|#metalink=|g' \"\$f\" 2>/dev/null || true; sed -i \"s|^baseurl=https://dl.rockylinux.org|baseurl=$_VAULT_URL|g\" \"\$f\" 2>/dev/null || true; sed -i \"s|^baseurl=https://repo.almalinux.org|baseurl=$_VAULT_URL|g\" \"\$f\" 2>/dev/null || true; sed -i \"s|^#baseurl=|baseurl=$_VAULT_URL/|g\" \"\$f\" 2>/dev/null || true; done; echo vault-inject-done" 2>&1)" || true
+    elif [[ "${GUEST_REPO_DRIVER:-apt}" == "apk" ]]; then
+      _VINJ_OUT="$(_gssh "echo '$_VAULT_URL' > /etc/apk/repositories 2>/dev/null || true; echo vault-inject-done" 2>&1)" || true
+    elif [[ "${GUEST_REPO_DRIVER:-apt}" == "pacman" ]]; then
+      _VINJ_OUT="$(_gssh "sed -i \"s|^Server = .*|Server = $_VAULT_URL|\" /etc/pacman.d/mirrorlist 2>/dev/null || true; echo vault-inject-done" 2>&1)" || true
     else
       _VINJ_OUT="$(_gssh "for f in /etc/apt/sources.list.d/*.sources; do [ -f \"\$f\" ] || continue; sed -i \"s|URIs: http://archive.ubuntu.com/ubuntu|URIs: $_VAULT_URL|g\" \"\$f\" 2>/dev/null || true; sed -i \"s|URIs: http://security.ubuntu.com/ubuntu|URIs: $_VAULT_URL|g\" \"\$f\" 2>/dev/null || true; sed -i \"s|URIs: https://deb.debian.org/debian|URIs: $_VAULT_URL|g\" \"\$f\" 2>/dev/null || true; done; if [ -f /etc/apt/sources.list ]; then sed -i \"s|http://archive.ubuntu.com/ubuntu|$_VAULT_URL|g\" /etc/apt/sources.list 2>/dev/null || true; sed -i \"s|http://security.ubuntu.com/ubuntu|$_VAULT_URL|g\" /etc/apt/sources.list 2>/dev/null || true; sed -i \"s|http://deb.debian.org/debian|$_VAULT_URL|g\" /etc/apt/sources.list 2>/dev/null || true; fi; echo vault-inject-done" 2>&1)" || true
     fi
@@ -227,6 +243,10 @@ if [[ "$_OFFICIAL_DEGRADED" == "true" ]] && \
     # Validate vault
     if [[ "${GUEST_REPO_DRIVER:-apt}" == "dnf-repo" ]]; then
       _VVAL_CMD="${GUEST_VAULT_VALIDATION_COMMAND:-dnf clean all && dnf -y makecache}"
+    elif [[ "${GUEST_REPO_DRIVER:-apt}" == "apk" ]]; then
+      _VVAL_CMD="${GUEST_VAULT_VALIDATION_COMMAND:-apk update}"
+    elif [[ "${GUEST_REPO_DRIVER:-apt}" == "pacman" ]]; then
+      _VVAL_CMD="${GUEST_VAULT_VALIDATION_COMMAND:-pacman -Sy --noconfirm}"
     else
       _VVAL_CMD="${GUEST_VAULT_VALIDATION_COMMAND:-apt-get update}"
     fi
@@ -244,6 +264,10 @@ if [[ "$_OFFICIAL_DEGRADED" == "true" ]] && \
       # Rollback vault -> restore backup, go to step 3
       if [[ "${GUEST_REPO_DRIVER:-apt}" == "dnf-repo" ]]; then
         _gssh_log "vault-rollback" "cp $_BACKUP_DIR/*.repo /etc/yum.repos.d/ 2>/dev/null || true; dnf clean all; echo vault-rollback-done" || true
+      elif [[ "${GUEST_REPO_DRIVER:-apt}" == "apk" ]]; then
+        _gssh_log "vault-rollback" "cp $_BACKUP_DIR/repositories /etc/apk/ 2>/dev/null || true; echo vault-rollback-done" || true
+      elif [[ "${GUEST_REPO_DRIVER:-apt}" == "pacman" ]]; then
+        _gssh_log "vault-rollback" "cp $_BACKUP_DIR/mirrorlist /etc/pacman.d/ 2>/dev/null || true; echo vault-rollback-done" || true
       else
         _gssh_log "vault-rollback" "cp $_BACKUP_DIR/*.list /etc/apt/sources.list.d/ 2>/dev/null || true; cp $_BACKUP_DIR/*.sources /etc/apt/sources.list.d/ 2>/dev/null || true; cp $_BACKUP_DIR/sources.list /etc/apt/ 2>/dev/null || true; echo vault-rollback-done" || true
       fi
@@ -261,6 +285,10 @@ if [[ "$_OFFICIAL_DEGRADED" == "true" && "$_REPO_MODE_USED" != "vault" ]]; then
   util_log_info "--- Phase 5 Step 3: Official Repo (last resort) ---"
   if [[ "${GUEST_REPO_DRIVER:-apt}" == "dnf-repo" ]]; then
     _LAST_CMD="${GUEST_REPO_BASELINE_UPDATE_COMMAND:-dnf clean all && dnf -y makecache}"
+  elif [[ "${GUEST_REPO_DRIVER:-apt}" == "apk" ]]; then
+    _LAST_CMD="${GUEST_REPO_BASELINE_UPDATE_COMMAND:-apk update}"
+  elif [[ "${GUEST_REPO_DRIVER:-apt}" == "pacman" ]]; then
+    _LAST_CMD="${GUEST_REPO_BASELINE_UPDATE_COMMAND:-pacman -Sy --noconfirm}"
   else
     _LAST_CMD="${GUEST_REPO_BASELINE_UPDATE_COMMAND:-apt-get update}"
   fi

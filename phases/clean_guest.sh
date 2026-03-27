@@ -168,6 +168,21 @@ else
   " 2>&1)" || _RESTORE_OUT="restore-ssh-fail"
   util_log_info "  [repo-restore] $_RESTORE_OUT"
 fi
+
+# --- Remove backup directory -------------------------------------------------
+util_log_info "Removing backup directory..."
+_BACKUP_DIR="${GUEST_REPO_BACKUP_DIR:-/var/backups/image-build/repos}"
+_REPO_DRIVER="${GUEST_REPO_DRIVER:-apt}"
+if [[ "$_REPO_DRIVER" == "dnf-repo" ]]; then
+  _RMBKP_OUT="$(_gssh "rm -rf $_BACKUP_DIR 2>/dev/null || true; echo backup-removed-ok" 2>&1)" || true
+elif [[ "$_REPO_DRIVER" == "apk" ]]; then
+  _RMBKP_OUT="$(_gssh "rm -rf $_BACKUP_DIR 2>/dev/null || true; echo backup-removed-ok" 2>&1)" || true
+elif [[ "$_REPO_DRIVER" == "pacman" ]]; then
+  _RMBKP_OUT="$(_gssh "rm -rf $_BACKUP_DIR 2>/dev/null || true; echo backup-removed-ok" 2>&1)" || true
+else
+  _RMBKP_OUT="$(_gssh "rm -rf $_BACKUP_DIR 2>/dev/null || true; echo backup-removed-ok" 2>&1)" || true
+fi
+util_log_info "  [backup-remove] $_RMBKP_OUT"
 # -----------------------------------------------------------------------------
 
 # --- Final shutdown -----------------------------------------------------------
