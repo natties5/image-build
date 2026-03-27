@@ -1,15 +1,15 @@
-[2026-03-27T16:32:09Z] [INFO] === sync_download: debian 13 [dry-run] ===
-[2026-03-27T16:32:09Z] [INFO] Index URL (primary): https://cloud.debian.org/images/cloud/trixie/latest
-[2026-03-27T16:32:09Z] [INFO] Fetching checksum: https://cloud.debian.org/images/cloud/trixie/latest/SHA512SUMS
-[2026-03-27T16:32:10Z] [INFO] Using index URL source: primary (https://cloud.debian.org/images/cloud/trixie/latest)
-[2026-03-27T16:32:10Z] [INFO] Checksum source: https://cloud.debian.org/images/cloud/trixie/latest/SHA512SUMS (50 raw lines)
-[2026-03-27T16:32:11Z] [INFO] Parsed entries: 50
-[2026-03-27T16:32:11Z] [INFO] Candidate count (before scoring): 2
-[2026-03-27T16:32:11Z] [INFO] Selected: debian-13-generic-amd64.qcow2 [arch=amd64 fmt=qcow2 sa=0 sf=0]
-[2026-03-27T16:32:11Z] [INFO] Winner:  debian-13-generic-amd64.qcow2
-[2026-03-27T16:32:12Z] [INFO]   URL:   https://cloud.debian.org/images/cloud/trixie/latest/debian-13-generic-amd64.qcow2
-[2026-03-27T16:32:12Z] [INFO]   Hash:  c6523db54404e320ed30787038f155f649995392697fa2a41e49458d36e056fda020593a03cf910fa7bf93bd5c510b12d6e7c7bf7852a03ee3a64536fecf0127 (sha512)
-[2026-03-27T16:32:12Z] [INFO]   Arch:  amd64  Format: qcow2
-[2026-03-27T16:32:12Z] [INFO] Manifest written: /c/Users/natti/Documents/git/image-build/runtime/state/sync/debian-13.json
-[2026-03-27T16:32:13Z] [INFO] Dry-run COMPLETE: debian 13
-[2026-03-27T16:32:13Z] [INFO] sync_download complete for OS: debian
+[2026-03-27T16:51:39Z] [INFO] === sync_download: debian 13 [dry-run] ===
+[2026-03-27T16:51:39Z] [INFO] Index URL (primary): https://cloud.debian.org/images/cloud/trixie/latest
+[2026-03-27T16:51:39Z] [INFO] Fetching checksum: https://cloud.debian.org/images/cloud/trixie/latest/SHA512SUMS
+[2026-03-27T16:51:40Z] [INFO] Using index URL source: primary (https://cloud.debian.org/images/cloud/trixie/latest)
+[2026-03-27T16:51:40Z] [INFO] Checksum source: https://cloud.debian.org/images/cloud/trixie/latest/SHA512SUMS (50 raw lines)
+[2026-03-27T16:51:41Z] [INFO] Parsed entries: 50
+[2026-03-27T16:51:41Z] [INFO] Candidate count (before scoring): 2
+[2026-03-27T16:51:41Z] [INFO] Selected: debian-13-generic-amd64.qcow2 [arch=amd64 fmt=qcow2 sa=0 sf=0]
+[2026-03-27T16:51:41Z] [INFO] Winner:  debian-13-generic-amd64.qcow2
+[2026-03-27T16:51:42Z] [INFO]   URL:   https://cloud.debian.org/images/cloud/trixie/latest/debian-13-generic-amd64.qcow2
+[2026-03-27T16:51:42Z] [INFO]   Hash:  c6523db54404e320ed30787038f155f649995392697fa2a41e49458d36e056fda020593a03cf910fa7bf93bd5c510b12d6e7c7bf7852a03ee3a64536fecf0127 (sha512)
+[2026-03-27T16:51:42Z] [INFO]   Arch:  amd64  Format: qcow2
+[2026-03-27T16:51:42Z] [INFO] Manifest written: /c/Users/natti/Documents/git/image-build/runtime/state/sync/debian-13.json
+[2026-03-27T16:51:43Z] [INFO] Dry-run COMPLETE: debian 13
+[2026-03-27T16:51:43Z] [INFO] sync_download complete for OS: debian

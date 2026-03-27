@@ -1,15 +1,15 @@
-[2026-03-27T16:31:59Z] [INFO] === sync_download: ubuntu 24.04 [dry-run] ===
-[2026-03-27T16:31:59Z] [INFO] Index URL (primary): https://cloud-images.ubuntu.com/releases/24.04/release
-[2026-03-27T16:31:59Z] [INFO] Fetching checksum: https://cloud-images.ubuntu.com/releases/24.04/release/SHA256SUMS
-[2026-03-27T16:32:02Z] [INFO] Using index URL source: primary (https://cloud-images.ubuntu.com/releases/24.04/release)
-[2026-03-27T16:32:02Z] [INFO] Checksum source: https://cloud-images.ubuntu.com/releases/24.04/release/SHA256SUMS (66 raw lines)
-[2026-03-27T16:32:03Z] [INFO] Parsed entries: 66
-[2026-03-27T16:32:03Z] [INFO] Candidate count (before scoring): 1
-[2026-03-27T16:32:03Z] [INFO] Selected: ubuntu-24.04-server-cloudimg-amd64.img [arch=amd64 fmt=img sa=0 sf=0]
-[2026-03-27T16:32:03Z] [INFO] Winner:  ubuntu-24.04-server-cloudimg-amd64.img
-[2026-03-27T16:32:03Z] [INFO]   URL:   https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img
-[2026-03-27T16:32:03Z] [INFO]   Hash:  5c3ddb00f60bc455dac0862fabe9d8bacec46c33ac1751143c5c3683404b110d (sha256)
-[2026-03-27T16:32:03Z] [INFO]   Arch:  amd64  Format: img
-[2026-03-27T16:32:04Z] [INFO] Manifest written: /c/Users/natti/Documents/git/image-build/runtime/state/sync/ubuntu-24.04.json
-[2026-03-27T16:32:05Z] [INFO] Dry-run COMPLETE: ubuntu 24.04
-[2026-03-27T16:32:05Z] [INFO] sync_download complete for OS: ubuntu
+[2026-03-27T16:51:38Z] [INFO] === sync_download: ubuntu 24.04 [dry-run] ===
+[2026-03-27T16:51:38Z] [INFO] Index URL (primary): https://cloud-images.ubuntu.com/releases/24.04/release
+[2026-03-27T16:51:38Z] [INFO] Fetching checksum: https://cloud-images.ubuntu.com/releases/24.04/release/SHA256SUMS
+[2026-03-27T16:51:40Z] [INFO] Using index URL source: primary (https://cloud-images.ubuntu.com/releases/24.04/release)
+[2026-03-27T16:51:41Z] [INFO] Checksum source: https://cloud-images.ubuntu.com/releases/24.04/release/SHA256SUMS (66 raw lines)
+[2026-03-27T16:51:41Z] [INFO] Parsed entries: 66
+[2026-03-27T16:51:41Z] [INFO] Candidate count (before scoring): 1
+[2026-03-27T16:51:42Z] [INFO] Selected: ubuntu-24.04-server-cloudimg-amd64.img [arch=amd64 fmt=img sa=0 sf=0]
+[2026-03-27T16:51:42Z] [INFO] Winner:  ubuntu-24.04-server-cloudimg-amd64.img
+[2026-03-27T16:51:42Z] [INFO]   URL:   https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img
+[2026-03-27T16:51:42Z] [INFO]   Hash:  5c3ddb00f60bc455dac0862fabe9d8bacec46c33ac1751143c5c3683404b110d (sha256)
+[2026-03-27T16:51:42Z] [INFO]   Arch:  amd64  Format: img
+[2026-03-27T16:51:43Z] [INFO] Manifest written: /c/Users/natti/Documents/git/image-build/runtime/state/sync/ubuntu-24.04.json
+[2026-03-27T16:51:43Z] [INFO] Dry-run COMPLETE: ubuntu 24.04
+[2026-03-27T16:51:43Z] [INFO] sync_download complete for OS: ubuntu

@@ -8,6 +8,10 @@ source "$REPO_ROOT/lib/layout.sh"
 imagectl_init_layout "$REPO_ROOT"
 imagectl_ensure_layout_dirs
 
+# Source common utils for util_escape_json
+# shellcheck disable=SC1091
+source "$REPO_ROOT/lib/common_utils.sh"
+
 CONFIG_FILE="${1:-$SETTINGS_DIR/ubuntu.env}"
 LEGACY_CONFIG_FILE="${REPO_ROOT}/config/control/source.env"
 
@@ -20,8 +24,17 @@ if [[ -f "$LEGACY_CONFIG_FILE" ]]; then
   source "$LEGACY_CONFIG_FILE"
 fi
 
-if [[ "${OS_FAMILY:-ubuntu}" != "ubuntu" ]]; then
-  exec bash "$REPO_ROOT/phases/download_multi_os.sh" "$CONFIG_FILE" "$@"
+# Determine OS family from config file path or variable
+_DETECT_OS="${OS_FAMILY:-}"
+if [[ -z "$_DETECT_OS" && -n "$CONFIG_FILE" && -f "$CONFIG_FILE" ]]; then
+  # Extract OS from filename: ubuntu.env → ubuntu
+  _DETECT_OS="$(basename "$CONFIG_FILE" .env)"
+fi
+_DETECT_OS="${_DETECT_OS:-ubuntu}"
+
+# Non-Ubuntu: delegate to unified sync_download.sh
+if [[ "$_DETECT_OS" != "ubuntu" ]]; then
+  exec bash "$REPO_ROOT/phases/sync_download.sh" --os "$_DETECT_OS" "$@"
 fi
 
 PIPELINE_ROOT="${PIPELINE_ROOT:-}"
@@ -96,17 +109,13 @@ curl_download() {
 }
 
 version_ge() {
-  [[ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | tail -n1)" == "$1" ]]
-}
-
-escape_json() {
-  local s="${1:-}"
-  s="${s//\\/\\\\}"
-  s="${s//\"/\\\"}"
-  s="${s//$'\n'/\\n}"
-  s="${s//$'\r'/\\r}"
-  s="${s//$'\t'/\\t}"
-  printf '%s' "$s"
+  local v1="$1" v2="$2"
+  # Guard: if both are identical strings (including "latest"), return true
+  [[ "$v1" == "$v2" ]] && return 0
+  # Guard: non-numeric version strings always pass
+  [[ "$v1" =~ ^[0-9] ]] || return 0
+  [[ "$v2" =~ ^[0-9] ]] || return 0
+  [[ "$(printf '%s\n%s\n' "$v2" "$v1" | sort -V | tail -n1)" == "$v1" ]]
 }
 
 series_codename_from_fallback() {
@@ -234,16 +243,16 @@ write_manifest() {
 
   cat > "$manifest_file" <<JSON
 {
-  "run_ts": "$(escape_json "$RUN_TS")",
-  "version": "$(escape_json "$version")",
-  "codename": "$(escape_json "$codename")",
-  "status": "$(escape_json "$status")",
-  "artifact_name": "$(escape_json "$artifact_name")",
-  "sha256": "$(escape_json "$sha256")",
-  "release_page": "$(escape_json "$release_page")",
-  "artifact_url": "$(escape_json "$artifact_url")",
-  "local_path": "$(escape_json "$local_path")",
-  "note": "$(escape_json "$note")"
+  "run_ts": "$(util_escape_json "$RUN_TS")",
+  "version": "$(util_escape_json "$version")",
+  "codename": "$(util_escape_json "$codename")",
+  "status": "$(util_escape_json "$status")",
+  "artifact_name": "$(util_escape_json "$artifact_name")",
+  "sha256": "$(util_escape_json "$sha256")",
+  "release_page": "$(util_escape_json "$release_page")",
+  "artifact_url": "$(util_escape_json "$artifact_url")",
+  "local_path": "$(util_escape_json "$local_path")",
+  "note": "$(util_escape_json "$note")"
 }
 JSON
 }

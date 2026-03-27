@@ -299,14 +299,6 @@ util_escape_json() {
   printf '%s' "$s"
 }
 
-# Escape a string for embedding in a JSON value (double-quotes, backslashes, newlines)
-json_escape() {
-  printf '%s' "$1" | \
-    sed 's/\\/\\\\/g; s/"/\\"/g' | \
-    awk '{printf "%s\\n", $0}' | \
-    sed 's/\\n$//'
-}
-
 # Write content to a JSON file (creates parent dirs)
 json_write_file() {
   local path="$1" content="$2"

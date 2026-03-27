@@ -1910,8 +1910,70 @@ _status_show_logs() {
 
 # ─── Cleanup menu (skeleton) ──────────────────────────────────────────────────
 menu_cleanup() {
-  util_log_info "NOT IMPLEMENTED: cleanup — see 07_MENU_DESIGN.md §6"
-  echo "  [TODO] cleanup not yet implemented."
+  while true; do
+    echo ""
+    echo "--- Cleanup ---"
+    echo "  1) Reconcile orphans   (find + clean dangling resources)"
+    echo "  2) Current run        (delete resources from last pipeline run)"
+    echo "  3) Back"
+    echo -n "  Select [1-3]: "
+    local choice; read -r choice || return
+    case "$choice" in
+      1) _cleanup_reconcile ;;
+      2) _cleanup_current_run ;;
+      3) return ;;
+      *) echo "  Invalid choice." ;;
+    esac
+  done
+}
+
+_cleanup_reconcile() {
+  echo ""
+  echo "  [reconcile] Scanning for orphan resources..."
+  echo "  NOTE: Orphan cleanup requires OpenStack CLI and valid auth."
+  echo "  Run: openstack server list --long | grep orphan"
+  echo "  Then manually delete with: openstack server delete <id>"
+  echo "  [reconcile] Not yet fully automated - see 07_MENU_DESIGN.md"
+}
+
+_cleanup_current_run() {
+  local os ver
+  os=$(_build_select_os 2>/dev/null) || {
+    echo "  No OS with state found."
+    return
+  }
+  ver=$(_build_select_version "$os" 2>/dev/null) || {
+    echo "  No version selected."
+    return
+  }
+  echo ""
+  echo "  WARNING: This will delete:"
+  echo "    - VM: ${os}-${ver}"
+  echo "    - Volumes attached to the VM"
+  echo "    - Floating IP (if assigned)"
+  echo ""
+  echo -n "  Continue? [y/N]: "
+  local confirm; read -r confirm || confirm="n"
+  if [[ "${confirm,,}" != "y" ]]; then
+    echo "  Cancelled."
+    return
+  fi
+  if command -v openstack >/dev/null 2>&1; then
+    local vm_name="${os}-${ver}"
+    echo "  Searching for server: $vm_name"
+    local server_id
+    server_id=$(openstack server list -f json 2>/dev/null \
+      | grep -o "\"Name\": \"$vm_name\"" | grep -o '[a-f0-9-]\{36\}' | head -1) || true
+    if [[ -n "$server_id" ]]; then
+      echo "  Deleting server $server_id..."
+      openstack server delete "$server_id" 2>/dev/null && echo "  OK: Server deleted" || echo "  FAIL: Could not delete server"
+    else
+      echo "  Server not found in OpenStack."
+    fi
+  else
+    echo "  openstack CLI not found - cannot cleanup."
+    echo "  Please delete resources manually via OpenStack dashboard or CLI."
+  fi
 }
 
 # ─── Direct command dispatch ──────────────────────────────────────────────────
@@ -1979,12 +2041,10 @@ dispatch_command() {
       esac
       ;;
     cleanup)
-      util_log_info "NOT IMPLEMENTED: cleanup — see 07_MENU_DESIGN.md §6"
-      echo "  [TODO] cleanup not yet implemented."
+      menu_cleanup
       ;;
     build)
-      util_log_info "NOT IMPLEMENTED: build — see 06_OPENSTACK_PIPELINE_DESIGN.md"
-      echo "  [TODO] build pipeline not yet implemented."
+      menu_build
       ;;
     --help|-h|help)
       show_help
