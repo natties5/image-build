@@ -1,0 +1,19 @@
+[2026-03-27T16:32:16Z] [INFO] === sync_download: fedora 41 [dry-run] ===
+[2026-03-27T16:32:16Z] [INFO] Index URL (primary): https://dl.fedoraproject.org/pub/fedora/linux/releases/41/Cloud/x86_64/images
+[2026-03-27T16:32:16Z] [INFO] Scanning index for checksum pattern /Fedora-Cloud-[0-9]+-[0-9.]+-x86_64-CHECKSUM/: https://dl.fedoraproject.org/pub/fedora/linux/releases/41/Cloud/x86_64/images/
+[2026-03-27T16:32:18Z] [ERROR] No checksum file matching /Fedora-Cloud-[0-9]+-[0-9.]+-x86_64-CHECKSUM/ found at: https://dl.fedoraproject.org/pub/fedora/linux/releases/41/Cloud/x86_64/images/
+[2026-03-27T16:32:18Z] [WARN] Primary index-scan failed, trying fallback: https://archives.fedoraproject.org/pub/archive/fedora/linux/releases/41/Cloud/x86_64/images
+[2026-03-27T16:32:19Z] [INFO] Scanning index for checksum pattern /Fedora-Cloud-[0-9]+-[0-9.]+-x86_64-CHECKSUM/: https://archives.fedoraproject.org/pub/archive/fedora/linux/releases/41/Cloud/x86_64/images/
+[2026-03-27T16:32:21Z] [INFO] Discovered checksum URL (fallback): https://archives.fedoraproject.org/pub/archive/fedora/linux/releases/41/Cloud/x86_64/images/Fedora-Cloud-41-1.4-x86_64-CHECKSUM
+[2026-03-27T16:32:22Z] [INFO] Using index URL source: fallback (https://archives.fedoraproject.org/pub/archive/fedora/linux/releases/41/Cloud/x86_64/images)
+[2026-03-27T16:32:22Z] [INFO] Checksum source: https://archives.fedoraproject.org/pub/archive/fedora/linux/releases/41/Cloud/x86_64/images/Fedora-Cloud-41-1.4-x86_64-CHECKSUM (33 raw lines)
+[2026-03-27T16:32:22Z] [INFO] Parsed entries: 7
+[2026-03-27T16:32:23Z] [INFO] Candidate count (before scoring): 1
+[2026-03-27T16:32:23Z] [INFO] Selected: Fedora-Cloud-Base-Generic-41-1.4.x86_64.qcow2 [arch=x86_64 fmt=qcow2 sa=0 sf=0]
+[2026-03-27T16:32:23Z] [INFO] Winner:  Fedora-Cloud-Base-Generic-41-1.4.x86_64.qcow2
+[2026-03-27T16:32:23Z] [INFO]   URL:   https://archives.fedoraproject.org/pub/archive/fedora/linux/releases/41/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-41-1.4.x86_64.qcow2
+[2026-03-27T16:32:23Z] [INFO]   Hash:  6205ae0c524b4d1816dbd3573ce29b5c44ed26c9fbc874fbe48c41c89dd0bac2 (sha256)
+[2026-03-27T16:32:23Z] [INFO]   Arch:  x86_64  Format: qcow2
+[2026-03-27T16:32:24Z] [INFO] Manifest written: /c/Users/natti/Documents/git/image-build/runtime/state/sync/fedora-41.json
+[2026-03-27T16:32:24Z] [INFO] Dry-run COMPLETE: fedora 41
+[2026-03-27T16:32:24Z] [INFO] sync_download complete for OS: fedora

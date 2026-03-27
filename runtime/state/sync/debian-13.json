@@ -1,0 +1,21 @@
+{
+  "os_family": "debian",
+  "version": "13",
+  "status": "dryrun-ok",
+  "mode": "dry-run",
+  "arch_selected": "amd64",
+  "format_selected": "qcow2",
+  "filename": "debian-13-generic-amd64.qcow2",
+  "download_url": "https://cloud.debian.org/images/cloud/trixie/latest/debian-13-generic-amd64.qcow2",
+  "checksum": "c6523db54404e320ed30787038f155f649995392697fa2a41e49458d36e056fda020593a03cf910fa7bf93bd5c510b12d6e7c7bf7852a03ee3a64536fecf0127",
+  "hash_algo": "sha512",
+  "checksum_source": "https://cloud.debian.org/images/cloud/trixie/latest/SHA512SUMS",
+  "workspace_path": "/c/Users/natti/Documents/git/image-build/workspace/images/debian/13/debian-13-generic-amd64.qcow2",
+  "discovery": {
+    "mode": "checksum_driven",
+    "index_url_template": "https://cloud.debian.org/images/cloud/{CODENAME}/latest",
+    "latest_logic": "current_folder"
+  },
+  "failure_reason": "",
+  "generated_at": "2026-03-27T16:32:12Z"
+}

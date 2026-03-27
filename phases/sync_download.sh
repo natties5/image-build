@@ -40,9 +40,9 @@ CODENAME_MAP=""
 DRY_RUN_SUPPORTED="yes"
 
 # ─── Argument parsing ─────────────────────────────────────────────────────────
-OPT_OS=""
-OPT_VERSION=""
-OPT_DRY_RUN=false
+_SYNC_OPT_OS=""
+_SYNC_OPT_VERSION=""
+_SYNC_OPT_DRY_RUN=false
 
 parse_args() {
   [[ $# -gt 0 ]] || {
@@ -51,9 +51,9 @@ parse_args() {
   }
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --os)       OPT_OS="$2"; shift 2 ;;
-      --version)  OPT_VERSION="$2"; shift 2 ;;
-      --dry-run)  OPT_DRY_RUN=true; shift ;;
+      --os)       _SYNC_OPT_OS="$2"; shift 2 ;;
+      --version)  _SYNC_OPT_VERSION="$2"; shift 2 ;;
+      --dry-run)  _SYNC_OPT_DRY_RUN=true; shift ;;
       --help|-h)
         echo "Usage: $0 --os <name> [--version <ver>] [--dry-run]"
         exit 0
@@ -61,7 +61,7 @@ parse_args() {
       *) util_die "Unknown argument: $1" 2 ;;
     esac
   done
-  [[ -n "$OPT_OS" ]] || util_die "--os <name> is required" 2
+  [[ -n "$_SYNC_OPT_OS" ]] || util_die "--os <name> is required" 2
 }
 
 # ─── Load OS sync config ──────────────────────────────────────────────────────
@@ -86,6 +86,11 @@ load_sync_config() {
 # Returns 0 if v1 >= v2 (supports major.minor.patch format)
 version_ge() {
   local v1="$1" v2="$2"
+  # Guard: if both are identical strings (including "latest"), return true
+  [[ "$v1" == "$v2" ]] && return 0
+  # Guard: non-numeric version strings always pass
+  [[ "$v1" =~ ^[0-9] ]] || return 0
+  [[ "$v2" =~ ^[0-9] ]] || return 0
   awk -v v1="$v1" -v v2="$v2" 'BEGIN {
     n1 = split(v1, a, ".")
     n2 = split(v2, b, ".")
@@ -295,25 +300,25 @@ write_manifest() {
   local ts; ts="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u)"
   cat > "$json_path" <<EOF
 {
-  "os_family": "${os_family}",
-  "version": "${version}",
-  "status": "${status}",
-  "mode": "${mode}",
-  "arch_selected": "${arch}",
-  "format_selected": "${fmt}",
-  "filename": "${filename}",
-  "download_url": "${download_url}",
-  "checksum": "${hash}",
-  "hash_algo": "${HASH_ALGO}",
-  "checksum_source": "${checksum_source}",
-  "workspace_path": "${workspace_path}",
+  "os_family": "$(util_escape_json "$os_family")",
+  "version": "$(util_escape_json "$version")",
+  "status": "$(util_escape_json "$status")",
+  "mode": "$(util_escape_json "$mode")",
+  "arch_selected": "$(util_escape_json "$arch")",
+  "format_selected": "$(util_escape_json "$fmt")",
+  "filename": "$(util_escape_json "$filename")",
+  "download_url": "$(util_escape_json "$download_url")",
+  "checksum": "$(util_escape_json "$hash")",
+  "hash_algo": "$(util_escape_json "$HASH_ALGO")",
+  "checksum_source": "$(util_escape_json "$checksum_source")",
+  "workspace_path": "$(util_escape_json "$workspace_path")",
   "discovery": {
-    "mode": "${DISCOVERY_MODE}",
-    "index_url_template": "${INDEX_URL_TEMPLATE}",
-    "latest_logic": "${LATEST_LOGIC}"
+    "mode": "$(util_escape_json "$DISCOVERY_MODE")",
+    "index_url_template": "$(util_escape_json "$INDEX_URL_TEMPLATE")",
+    "latest_logic": "$(util_escape_json "$LATEST_LOGIC")"
   },
-  "failure_reason": "${failure_reason}",
-  "generated_at": "${ts}"
+  "failure_reason": "$(util_escape_json "$failure_reason")",
+  "generated_at": "$(util_escape_json "$ts")"
 }
 EOF
   util_log_info "Manifest written: $json_path"
@@ -326,16 +331,16 @@ write_failure() {
   local ts; ts="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u)"
   cat > "$json_path" <<EOF
 {
-  "os_family": "${os_family}",
-  "version": "${version}",
+  "os_family": "$(util_escape_json "$os_family")",
+  "version": "$(util_escape_json "$version")",
   "status": "failed",
-  "mode": "${mode}",
+  "mode": "$(util_escape_json "$mode")",
   "filename": "",
   "download_url": "",
   "checksum": "",
-  "hash_algo": "${HASH_ALGO}",
-  "failure_reason": "${reason}",
-  "generated_at": "${ts}"
+  "hash_algo": "$(util_escape_json "$HASH_ALGO")",
+  "failure_reason": "$(util_escape_json "$reason")",
+  "generated_at": "$(util_escape_json "$ts")"
 }
 EOF
   # Clear any success flags, set failed flag
@@ -354,7 +359,9 @@ verify_file_hash() {
   case "$algo" in
     sha256) actual_hash=$(sha256sum "$filepath" | awk '{print $1}') ;;
     sha512) actual_hash=$(sha512sum "$filepath" | awk '{print $1}') ;;
-    *)      util_die "Unknown hash algo: ${algo}" ;;
+    sha384) actual_hash=$(sha384sum "$filepath" | awk '{print $1}') ;;
+    md5)    actual_hash=$(md5sum "$filepath" | awk '{print $1}') ;;
+    *)      util_die "Unsupported hash algo: ${algo}. Supported: sha256 sha512 sha384 md5" ;;
   esac
   if [[ "$actual_hash" == "$expected_hash" ]]; then
     util_log_info "Hash OK: ${actual_hash}"
@@ -370,17 +377,24 @@ download_image() {
   local url="$1" dest_dir="$2" filename="$3"
   local dest_path="${dest_dir}/${filename}"
   [[ -d "$dest_dir" ]] || mkdir -p "$dest_dir"
+  # Check available disk space (require at least 3GB free)
+  local avail_mb
+  avail_mb="$(df -m "$dest_dir" 2>/dev/null | awk 'NR==2{print $4}')" || true
+  if [[ -n "$avail_mb" ]] && (( avail_mb < 3000 )); then
+    util_log_error "Insufficient disk space: ${avail_mb}MB available in ${dest_dir} (need 3000MB)"
+    return 1
+  fi
   util_log_info "Downloading: ${url}"
   util_log_info "Destination: ${dest_path}"
   if command -v wget >/dev/null 2>&1; then
     wget --continue \
-         --timeout=3600 \
+         --timeout="${DOWNLOAD_TIMEOUT:-3600}" \
          --tries=3 \
          --progress=dot:giga \
          -O "$dest_path" \
          "$url" >/dev/null
   elif command -v curl >/dev/null 2>&1; then
-    curl -L --continue-at - --max-time 3600 --retry 2 \
+    curl -L --continue-at - --max-time "${DOWNLOAD_TIMEOUT:-3600}" --retry 2 \
          --progress-bar \
          -o "$dest_path" "$url" >/dev/null
   else
@@ -592,19 +606,19 @@ process_version() {
 main() {
   parse_args "$@"
   core_ensure_runtime_dirs
-  load_sync_config "$OPT_OS"
+  load_sync_config "$_SYNC_OPT_OS"
 
   # Determine which versions to process
   local versions_to_process=()
-  if [[ -n "$OPT_VERSION" ]]; then
-    versions_to_process=("$OPT_VERSION")
+  if [[ -n "$_SYNC_OPT_VERSION" ]]; then
+    versions_to_process=("$_SYNC_OPT_VERSION")
   else
     read -ra versions_to_process <<< "$TRACKED_VERSIONS"
   fi
 
   local had_failure=false
   for ver in "${versions_to_process[@]}"; do
-    process_version "$OPT_OS" "$ver" "$OPT_DRY_RUN" || had_failure=true
+    process_version "$_SYNC_OPT_OS" "$ver" "$_SYNC_OPT_DRY_RUN" || had_failure=true
   done
 
   if $had_failure; then
@@ -612,7 +626,7 @@ main() {
     exit 1
   fi
 
-  util_log_info "sync_download complete for OS: ${OPT_OS}"
+  util_log_info "sync_download complete for OS: ${_SYNC_OPT_OS}"
 }
 
 main "$@"

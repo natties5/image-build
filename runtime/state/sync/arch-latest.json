@@ -1,0 +1,21 @@
+{
+  "os_family": "arch",
+  "version": "latest",
+  "status": "dryrun-ok",
+  "mode": "dry-run",
+  "arch_selected": "x86_64",
+  "format_selected": "qcow2",
+  "filename": "Arch-Linux-x86_64-cloudimg.qcow2",
+  "download_url": "https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2",
+  "checksum": "74403af7ca9ec85766f0143d33b5b7a6717413a6a0fb9c276d403e21f057cd72",
+  "hash_algo": "sha256",
+  "checksum_source": "https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2.SHA256",
+  "workspace_path": "/c/Users/natti/Documents/git/image-build/workspace/images/arch/latest/Arch-Linux-x86_64-cloudimg.qcow2",
+  "discovery": {
+    "mode": "checksum_driven",
+    "index_url_template": "https://geo.mirror.pkgbuild.com/images/latest",
+    "latest_logic": "current_folder"
+  },
+  "failure_reason": "",
+  "generated_at": "2026-03-27T16:32:32Z"
+}

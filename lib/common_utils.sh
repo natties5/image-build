@@ -286,6 +286,19 @@ _detect_python() {
 }
 
 # ─── JSON helpers ─────────────────────────────────────────────────────────────
+# Escape a string for safe embedding inside a JSON double-quoted value.
+# Handles: backslash, double-quote, newline, carriage-return, tab.
+# Usage: escaped="$(util_escape_json "$raw_string")"
+util_escape_json() {
+  local s="${1:-}"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  s="${s//$'\n'/\\n}"
+  s="${s//$'\r'/\\r}"
+  s="${s//$'\t'/\\t}"
+  printf '%s' "$s"
+}
+
 # Escape a string for embedding in a JSON value (double-quotes, backslashes, newlines)
 json_escape() {
   printf '%s' "$1" | \

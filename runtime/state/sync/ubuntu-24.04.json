@@ -1,0 +1,21 @@
+{
+  "os_family": "ubuntu",
+  "version": "24.04",
+  "status": "dryrun-ok",
+  "mode": "dry-run",
+  "arch_selected": "amd64",
+  "format_selected": "img",
+  "filename": "ubuntu-24.04-server-cloudimg-amd64.img",
+  "download_url": "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img",
+  "checksum": "5c3ddb00f60bc455dac0862fabe9d8bacec46c33ac1751143c5c3683404b110d",
+  "hash_algo": "sha256",
+  "checksum_source": "https://cloud-images.ubuntu.com/releases/24.04/release/SHA256SUMS",
+  "workspace_path": "/c/Users/natti/Documents/git/image-build/workspace/images/ubuntu/24.04/ubuntu-24.04-server-cloudimg-amd64.img",
+  "discovery": {
+    "mode": "checksum_driven",
+    "index_url_template": "https://cloud-images.ubuntu.com/releases/{VERSION}/release",
+    "latest_logic": "current_folder"
+  },
+  "failure_reason": "",
+  "generated_at": "2026-03-27T16:32:03Z"
+}

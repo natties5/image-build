@@ -1,0 +1,15 @@
+[2026-03-27T16:32:29Z] [INFO] === sync_download: arch latest [dry-run] ===
+[2026-03-27T16:32:29Z] [INFO] Index URL (primary): https://geo.mirror.pkgbuild.com/images/latest
+[2026-03-27T16:32:29Z] [INFO] Fetching checksum: https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2.SHA256
+[2026-03-27T16:32:31Z] [INFO] Using index URL source: primary (https://geo.mirror.pkgbuild.com/images/latest)
+[2026-03-27T16:32:31Z] [INFO] Checksum source: https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2.SHA256 (1 raw lines)
+[2026-03-27T16:32:31Z] [INFO] Parsed entries: 1
+[2026-03-27T16:32:32Z] [INFO] Candidate count (before scoring): 1
+[2026-03-27T16:32:32Z] [INFO] Selected: Arch-Linux-x86_64-cloudimg.qcow2 [arch=x86_64 fmt=qcow2 sa=0 sf=0]
+[2026-03-27T16:32:32Z] [INFO] Winner:  Arch-Linux-x86_64-cloudimg.qcow2
+[2026-03-27T16:32:32Z] [INFO]   URL:   https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2
+[2026-03-27T16:32:32Z] [INFO]   Hash:  74403af7ca9ec85766f0143d33b5b7a6717413a6a0fb9c276d403e21f057cd72 (sha256)
+[2026-03-27T16:32:32Z] [INFO]   Arch:  x86_64  Format: qcow2
+[2026-03-27T16:32:33Z] [INFO] Manifest written: /c/Users/natti/Documents/git/image-build/runtime/state/sync/arch-latest.json
+[2026-03-27T16:32:33Z] [INFO] Dry-run COMPLETE: arch latest
+[2026-03-27T16:32:33Z] [INFO] sync_download complete for OS: arch
