@@ -20,8 +20,10 @@ logs/
 *.log
 *.jsonl
 
-# Runtime / state outputs
+# Generated state / runtime
 runtime/
+state/sync/plans/**/plan.json
+state/sync/plans/**/manifest.json
 state/sync/plans/**/run.json
 state/sync/plans/**/logs.jsonl
 
