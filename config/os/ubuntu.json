@@ -1,0 +1,50 @@
+{
+  "os": "ubuntu",
+  "min_version": "20.04",
+  "aliases": {
+    "jammy": "22.04",
+    "noble": "24.04",
+    "focal": "20.04"
+  },
+  "architectures": {
+    "amd64": "x86_64",
+    "x86_64": "x86_64",
+    "arm64": "aarch64",
+    "aarch64": "aarch64"
+  },
+  "sources": {
+    "20.04": {
+      "release_name": "focal",
+      "artifact_type": "qcow2",
+      "listing_url": "https://cloud-images.ubuntu.com/focal/current/",
+      "filename_patterns": [
+        "focal-server-cloudimg-amd64.img",
+        "focal-server-cloudimg-arm64.img"
+      ],
+      "checksum_file": "SHA256SUMS",
+      "checksum_algorithm": "sha256"
+    },
+    "22.04": {
+      "release_name": "jammy",
+      "artifact_type": "qcow2",
+      "listing_url": "https://cloud-images.ubuntu.com/jammy/current/",
+      "filename_patterns": [
+        "jammy-server-cloudimg-amd64.img",
+        "jammy-server-cloudimg-arm64.img"
+      ],
+      "checksum_file": "SHA256SUMS",
+      "checksum_algorithm": "sha256"
+    },
+    "24.04": {
+      "release_name": "noble",
+      "artifact_type": "qcow2",
+      "listing_url": "https://cloud-images.ubuntu.com/noble/current/",
+      "filename_patterns": [
+        "noble-server-cloudimg-amd64.img",
+        "noble-server-cloudimg-arm64.img"
+      ],
+      "checksum_file": "SHA256SUMS",
+      "checksum_algorithm": "sha256"
+    }
+  }
+}
