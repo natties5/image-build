@@ -1,0 +1,60 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Temp / partial
+*.tmp
+*.temp
+*.partial
+
+# Logs
+logs/
+*.log
+*.jsonl
+
+# Runtime / state outputs
+runtime/
+state/sync/plans/**/run.json
+state/sync/plans/**/logs.jsonl
+
+# Reports generated during runs
+reports/sync/*.md
+
+# Downloaded images / cache
+cache/
+*.img
+*.qcow2
+*.raw
+*.vmdk
+*.vdi
+*.iso
+*.tar
+*.tar.gz
+*.xz
+*.gz
+*.bz2
+*.zst
+
+# Local credentials / environment
+id_jump
+*.pem
+*.key
+*.pub
+.env
+.env.*
+settings/
+jumphost.md
+
+# Local workspace
+workspace/
+
+# Windows odd file
+nul
