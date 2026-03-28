@@ -413,6 +413,9 @@ if [[ "${GUEST_SET_LOCALE:-0}" == "1" ]]; then
   _LOCALE_METHOD="${GUEST_LOCALE_METHOD:-locale-gen}"
   if [[ "$_LOCALE_METHOD" == "localectl" ]]; then
     _LOCALE_OUT="$(_gssh "localectl set-locale LANG=$_LOCALE_VAL || true; echo locale-ok" 2>&1)" || true
+  elif [[ "$_LOCALE_METHOD" == "none" ]]; then
+    _LOCALE_OUT="locale-skipped (GUEST_LOCALE_METHOD=none)"
+    util_log_info "  [locale] skipped — GUEST_LOCALE_METHOD=none"
   else
     _LOCALE_OUT="$(_gssh "locale-gen \"$_LOCALE_GEN\" && update-locale LANG=$_LOCALE_VAL && echo locale-ok" 2>&1)" || true
   fi
@@ -496,12 +499,21 @@ _STEPS+=("ssh-policy")
 util_log_info "--- Phase 13: Services ---"
 if [[ -n "${GUEST_ENABLE_SERVICES:-}" || -n "${GUEST_DISABLE_SERVICES:-}" ]]; then
   _SVC_CMDS=""
-  for _svc in ${GUEST_ENABLE_SERVICES:-}; do
-    _SVC_CMDS+="systemctl enable $_svc 2>/dev/null || true; "
-  done
-  for _svc in ${GUEST_DISABLE_SERVICES:-}; do
-    _SVC_CMDS+="systemctl disable $_svc 2>/dev/null || true; "
-  done
+  if [[ "${GUEST_REPO_DRIVER:-apt}" == "apk" ]]; then
+    for _svc in ${GUEST_ENABLE_SERVICES:-}; do
+      _SVC_CMDS+="rc-update add $_svc default 2>/dev/null || true; "
+    done
+    for _svc in ${GUEST_DISABLE_SERVICES:-}; do
+      _SVC_CMDS+="rc-update del $_svc default 2>/dev/null || true; "
+    done
+  else
+    for _svc in ${GUEST_ENABLE_SERVICES:-}; do
+      _SVC_CMDS+="systemctl enable $_svc 2>/dev/null || true; "
+    done
+    for _svc in ${GUEST_DISABLE_SERVICES:-}; do
+      _SVC_CMDS+="systemctl disable $_svc 2>/dev/null || true; "
+    done
+  fi
   _SVC_OUT="$(_gssh "${_SVC_CMDS}echo services-ok" 2>&1)" || true
   util_log_info "  [services] $_SVC_OUT"
   _STEPS+=("services")
