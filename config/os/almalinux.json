@@ -1,0 +1,33 @@
+{
+  "os": "almalinux",
+  "min_version": "8",
+  "aliases": {},
+  "architectures": {
+    "amd64": "x86_64",
+    "x86_64": "x86_64",
+    "arm64": "aarch64",
+    "aarch64": "aarch64"
+  },
+  "sources": {
+    "8": {
+      "release_name": "8",
+      "artifact_type": "qcow2",
+      "listing_url": "https://repo.almalinux.org/almalinux/8/cloud/x86_64/images/",
+      "filename_patterns": [
+        "AlmaLinux-8-GenericCloud-latest.x86_64.qcow2"
+      ],
+      "checksum_file": "CHECKSUM",
+      "checksum_algorithm": "sha256"
+    },
+    "9": {
+      "release_name": "9",
+      "artifact_type": "qcow2",
+      "listing_url": "https://repo.almalinux.org/almalinux/9/cloud/x86_64/images/",
+      "filename_patterns": [
+        "AlmaLinux-9-GenericCloud-latest.x86_64.qcow2"
+      ],
+      "checksum_file": "CHECKSUM",
+      "checksum_algorithm": "sha256"
+    }
+  }
+}
