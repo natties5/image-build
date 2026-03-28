@@ -54,10 +54,16 @@ Config ถูกแบ่งเป็น 2 ระดับ:
 - user_agent
 
 ### Per-OS Config (`config/os/*.json`)
-แยกตาม OS แต่ละตัว (ubuntu.json, debian.json):
+แยกตาม OS แต่ละตัว:
+- ubuntu.json - Ubuntu LTS releases
+- debian.json - Debian releases
+- rocky.json - Rocky Linux releases
+- almalinux.json - AlmaLinux releases
+
+Each file contains:
 - os: ชื่อ OS
 - min_version: minimum supported version
-- aliases: version aliases (e.g., jammy -> 22.04)
+- aliases: version aliases
 - architectures: arch mappings
 - sources: version-specific listing/checksum settings
 
@@ -90,12 +96,23 @@ input
 
 Dry-run:
 ```bash
+# Ubuntu
 py tools\sync\sync_image.py ubuntu 22.04 amd64
 py tools\sync\sync_image.py ubuntu jammy amd64
 py tools\sync\sync_image.py ubuntu 20.04 amd64
 py tools\sync\sync_image.py ubuntu 24.04 amd64
+
+# Debian
 py tools\sync\sync_image.py debian 12 amd64
 py tools\sync\sync_image.py debian 13 amd64
+
+# Rocky Linux
+py tools\sync\sync_image.py rocky 8 amd64
+py tools\sync\sync_image.py rocky 9 amd64
+
+# AlmaLinux
+py tools\sync\sync_image.py almalinux 8 amd64
+py tools\sync\sync_image.py almalinux 9 amd64
 ```
 
 Execute:
@@ -130,6 +147,8 @@ py tools\sync\sync_image.py --execute --plan-id <plan_id>
 - Error messages ที่ user-friendly พร้อม hints
 - รองรับ Ubuntu 20.04 (focal) เพิ่ม
 - รองรับ Debian 13 (trixie) เพิ่ม
+- รองรับ Rocky Linux 8 และ 9
+- รองรับ AlmaLinux 8 และ 9
 - Stale cache detection (checksum, source_url, filename changes)
 - Cache states: HIT, MISS, INVALID, STALE
 - Retry policy สำหรับ failed downloads (3 attempts with exponential backoff)
@@ -137,6 +156,7 @@ py tools\sync\sync_image.py --execute --plan-id <plan_id>
 - Checksum mismatch test fixture
 - **Config split: global + per-OS files**
 - **min_version guard for version validation**
+- **Enhanced checksum parser** (รองรับทั้ง Ubuntu/Debian และ Rocky/AlmaLinux formats)
 
 ### OS Coverage
 - Ubuntu 20.04 LTS (focal) - min_version: 20.04
@@ -144,6 +164,13 @@ py tools\sync\sync_image.py --execute --plan-id <plan_id>
 - Ubuntu 24.04 LTS (noble) - min_version: 20.04
 - Debian 12 (bookworm) - min_version: 12
 - Debian 13 (trixie) - min_version: 12
+- Rocky Linux 8 - min_version: 8
+- Rocky Linux 9 - min_version: 8
+- AlmaLinux 8 - min_version: 8
+- AlmaLinux 9 - min_version: 8
+
+### Known Limitations
+- **Fedora**: Official download site (download.fedoraproject.org) มี Anubis bot protection ทำให้ไม่สามารถใช้งานกับระบบ automation ได้โดยตรง ต้องใช้ mirror อื่นหรือรอการแก้ไขเพิ่มเติม
 
 ### Architecture Support
 - amd64 (x86_64)
@@ -159,3 +186,4 @@ py tools\sync\sync_image.py --execute --plan-id <plan_id>
 ### Remaining Gaps
 - cross-check กับ upstream metadata เพิ่มเติม
 - full integration tests with complete downloads (Smoke Pass sufficient for most cases)
+- Fedora support (requires mirror or bot protection bypass)

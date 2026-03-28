@@ -12,6 +12,8 @@
 - [x] `config/sync-config.json` contains only global/shared settings
 - [x] `config/os/ubuntu.json` created with min_version, aliases, architectures, sources
 - [x] `config/os/debian.json` created with min_version, aliases, architectures, sources
+- [x] `config/os/rocky.json` created with min_version, architectures, sources
+- [x] `config/os/almalinux.json` created with min_version, architectures, sources
 - [x] Loader reads and merges split configs correctly
 - [x] Backward compatibility preserved for CLI interface
 
@@ -35,8 +37,9 @@
 - [x] map alias ไป canonical version ได้
 - [x] มี host allowlist
 - [x] coverage Ubuntu 20.04, 22.04, 24.04
-- [x] coverage Debian 12
-- [x] coverage Debian 13
+- [x] coverage Debian 12, 13
+- [x] coverage Rocky Linux 8, 9
+- [x] coverage AlmaLinux 8, 9
 
 ---
 
@@ -46,6 +49,7 @@
 - [x] parse candidate จริง
 - [x] filter candidate จริง
 - [x] select candidate แบบ strict จริง
+- [x] filter out checksum/metadata files (.CHECKSUM, .asc, .sig)
 
 ---
 
@@ -55,7 +59,9 @@
 - [x] freeze expected checksum ลง plan
 - [x] reject ambiguity จริง
 - [x] **min_version guard**: reject versions below minimum early
-- [x] **min_version guard**: works with aliases (e.g., bionic -> 18.04)
+- [x] **min_version guard**: works with aliases
+- [x] **checksum parser**: support Ubuntu/Debian format (hash filename)
+- [x] **checksum parser**: support Rocky/AlmaLinux format (SHA256 (filename) = hash)
 - [ ] cross-check version กับ upstream metadata อื่นนอกจาก filename/checksum
 
 ---
@@ -95,29 +101,42 @@
 
 ### Config Structure Tests
 - [x] Global config loads successfully
-- [x] Per-OS configs (ubuntu, debian) load successfully
+- [x] Per-OS configs (ubuntu, debian, rocky, almalinux) load successfully
 - [x] Split config merge works in runtime
 - [x] No breaking changes to existing functionality
 
-### Positive Tests (Dry-run)
+### Ubuntu Tests (Dry-run)
 - [x] ubuntu 20.04 amd64 dry-run
 - [x] ubuntu 22.04 amd64 dry-run
 - [x] ubuntu 24.04 amd64 dry-run
 - [x] ubuntu focal alias dry-run
 - [x] ubuntu jammy alias dry-run
 - [x] ubuntu noble alias dry-run
+
+### Debian Tests (Dry-run)
 - [x] debian 12 amd64 dry-run
 - [x] debian 13 amd64 dry-run
 - [x] debian bookworm alias dry-run
 - [x] debian trixie alias dry-run
 
+### Rocky Linux Tests
+- [x] rocky 8 amd64 dry-run
+- [x] rocky 9 amd64 dry-run
+- [x] rocky 7 amd64 rejected (below min_version)
+- [~] rocky execute smoke-pass (started, timeout expected for large download)
+
+### AlmaLinux Tests
+- [x] almalinux 8 amd64 dry-run
+- [x] almalinux 9 amd64 dry-run
+- [x] almalinux 7 amd64 rejected (below min_version)
+- [~] almalinux execute smoke-pass (not tested, similar to Rocky)
+
 ### min_version Guard Tests
 - [x] **Reject**: ubuntu 18.04 amd64 (below min_version 20.04)
 - [x] **Reject**: debian 11 amd64 (below min_version 12)
-- [x] **Accept**: ubuntu 20.04 amd64 (at min_version)
-- [x] **Accept**: ubuntu focal alias (resolves to 20.04)
-- [x] **Accept**: debian 12 amd64 (at min_version)
-- [x] **Accept**: debian bookworm alias (resolves to 12)
+- [x] **Reject**: rocky 7 amd64 (below min_version 8)
+- [x] **Reject**: almalinux 7 amd64 (below min_version 8)
+- [x] **Accept**: All supported versions at or above min_version
 
 ### Positive Tests (Execute)
 - [x] execute with valid plan-id works (cached path tested)
@@ -133,7 +152,7 @@
 
 ### Negative Tests
 - [x] unsupported os (centos)
-- [x] unsupported version (ubuntu 18.04, debian 11)
+- [x] unsupported version (all OS families)
 - [x] unsupported arch (ppc64le)
 - [x] missing plan-id
 - [x] bad plan-id
@@ -143,6 +162,7 @@
 - [x] checksum mismatch detection (fixture test)
 - [x] checksum match allows file promotion (fixture test)
 - [x] partial file cleanup on mismatch (fixture test)
+- [x] Rocky/AlmaLinux SHA256 format parsing
 
 ### Error Handling
 - [x] user-friendly error messages
@@ -157,21 +177,26 @@
 
 ---
 
-## Files Changed (Refactor)
+## Files Changed (Refactor + New OS Support)
 
 ### New Files
 - `config/os/ubuntu.json` - Ubuntu-specific config with min_version
 - `config/os/debian.json` - Debian-specific config with min_version
+- `config/os/rocky.json` - Rocky Linux config with min_version
+- `config/os/almalinux.json` - AlmaLinux config with min_version
 
 ### Modified Files
 - `config/sync-config.json` - Simplified to global settings only
-- `tools/sync/sync_image.py` - Updated loader to read split configs, added min_version validation
-- `docs/current-plan.md` - Updated to reflect new config structure
+- `tools/sync/sync_image.py` - Updated loader, enhanced checksum parser, improved candidate selection
+- `docs/current-plan.md` - Updated to reflect new config structure and OS coverage
 - `docs/checklist-current-plan.md` - Updated with new tests and structure
 
 ---
 
-## Remaining Gaps
+## Known Limitations & Future Work
+- **Fedora**: Official download site has Anubis bot protection preventing automated access
+  - Workaround: Use alternative mirrors or manual download
+  - Status: Config structure prepared but not enabled due to bot protection
 - cross-check with extra upstream metadata
-- full integration test with complete downloads (optional, Smoke Pass sufficient)
+- full integration tests with complete downloads (Smoke Pass sufficient for most cases)
 - stale cache detection for additional metadata changes (if needed)
