@@ -318,6 +318,10 @@ util_log_info "--- Phase 6: Update / Upgrade ---"
 if [[ "${GUEST_RUN_BASELINE_UPDATE:-0}" == "1" ]]; then
   if [[ "${GUEST_REPO_DRIVER:-apt}" == "dnf-repo" ]]; then
     _UPD_CMD="${GUEST_UPDATE_COMMAND:-dnf clean all && dnf -y makecache}"
+  elif [[ "${GUEST_REPO_DRIVER:-apt}" == "apk" ]]; then
+    _UPD_CMD="${GUEST_UPDATE_COMMAND:-apk update}"
+  elif [[ "${GUEST_REPO_DRIVER:-apt}" == "pacman" ]]; then
+    _UPD_CMD="${GUEST_UPDATE_COMMAND:-pacman -Sy --noconfirm}"
   else
     _UPD_CMD="${GUEST_UPDATE_COMMAND:-apt-get update}"
   fi
@@ -330,6 +334,10 @@ fi
 if [[ "${GUEST_RUN_FULL_UPGRADE:-0}" == "1" ]]; then
   if [[ "${GUEST_REPO_DRIVER:-apt}" == "dnf-repo" ]]; then
     _UPG_CMD="${GUEST_UPGRADE_COMMAND:-dnf -y upgrade --nobest}"
+  elif [[ "${GUEST_REPO_DRIVER:-apt}" == "apk" ]]; then
+    _UPG_CMD="${GUEST_UPGRADE_COMMAND:-apk upgrade --no-cache}"
+  elif [[ "${GUEST_REPO_DRIVER:-apt}" == "pacman" ]]; then
+    _UPG_CMD="${GUEST_UPGRADE_COMMAND:-pacman -Syu --noconfirm}"
   else
     _UPG_CMD="${GUEST_UPGRADE_COMMAND:-DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade -y}"
   fi
