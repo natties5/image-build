@@ -884,7 +884,10 @@ _settings_edit_guest_access() {
     local kf
     for kf in "${guest_keys_dir}"/id_* "${guest_keys_dir}"/*.pem \
                "${guest_keys_dir}"/*.rsa; do
-      [[ -f "$kf" ]] && keyfiles+=("$(basename "$kf")") || true
+      [[ -f "$kf" ]] || continue
+      # ข้าม .pub files — แสดงเฉพาะ private keys
+      [[ "$kf" == *.pub ]] && continue
+      keyfiles+=("$(basename "$kf")")
     done
 
     if [[ ${#keyfiles[@]} -eq 0 ]]; then
@@ -894,6 +897,17 @@ _settings_edit_guest_access() {
     elif [[ ${#keyfiles[@]} -eq 1 ]]; then
       echo "  Auto-selected key: ${keyfiles[0]}"
       new_private_key="${guest_keys_dir}/${keyfiles[0]}"
+      # Auto-read .pub file ถ้ามีคู่กัน
+      local _pub_file="${new_private_key}.pub"
+      if [[ -f "$_pub_file" ]]; then
+        local _pub_content
+        _pub_content="$(cat "$_pub_file")"
+        if [[ -n "$_pub_content" ]]; then
+          new_auth_key="$_pub_content"
+          echo "  Auto-read public key: $(basename "$_pub_file")"
+          echo "  ROOT_AUTHORIZED_KEY set automatically"
+        fi
+      fi
     else
       echo "  Available keys in settings/guest-keys/:"
       local i=1
@@ -907,6 +921,17 @@ _settings_edit_guest_access() {
         local sel=$(( kidx - 1 ))
         if (( sel >= 0 && sel < ${#keyfiles[@]} )); then
           new_private_key="${guest_keys_dir}/${keyfiles[$sel]}"
+          # Auto-read .pub file ถ้ามีคู่กัน
+          local _pub_file="${new_private_key}.pub"
+          if [[ -f "$_pub_file" ]]; then
+            local _pub_content
+            _pub_content="$(cat "$_pub_file")"
+            if [[ -n "$_pub_content" ]]; then
+              new_auth_key="$_pub_content"
+              echo "  Auto-read public key: $(basename "$_pub_file")"
+              echo "  ROOT_AUTHORIZED_KEY set automatically"
+            fi
+          fi
         fi
       fi
     fi
@@ -1376,6 +1401,21 @@ _build_preflight() {
     ok=false
   else
     echo "  ✓ guest-access.env exists"
+    # shellcheck disable=SC1090
+    source "${GUEST_ACCESS_ENV}" 2>/dev/null || true
+    if [[ "${SSH_AUTH_MODE:-}" == "key" ]]; then
+      local _warn_key=false
+      if [[ -z "${ROOT_AUTHORIZED_KEY:-}" ]]; then
+        echo "  ⚠ SSH_AUTH_MODE=key but ROOT_AUTHORIZED_KEY is empty"
+        echo "    → SSH to root will fail unless KEY_NAME is set and Nova injects it"
+        echo "    → Recommended: Settings → Edit Guest Access → paste public key"
+        _warn_key=true
+      fi
+      if [[ -n "${SSH_PRIVATE_KEY:-}" && ! -f "${SSH_PRIVATE_KEY}" ]]; then
+        echo "  ✗ SSH_PRIVATE_KEY file not found: ${SSH_PRIVATE_KEY}"
+        ok=false
+      fi
+    fi
   fi
 
   local sync_ready="${STATE_SYNC_DIR}/${os}-${version}.ready"

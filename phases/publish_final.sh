@@ -30,14 +30,36 @@ LOG_FILE="$(core_log_path "$PHASE" "$OS_FAMILY" "$VERSION")"
 util_init_log_file "$LOG_FILE"
 util_log_info "=== publish_final: $OS_FAMILY $VERSION ==="
 
-# ─── Source openrc ────────────────────────────────────────────────────────────
-OPENRC_FILE="${ROOT_DIR}/settings/openrc-file/openrc-nutpri.sh"
-if [[ -f "$OPENRC_FILE" ]]; then
+# ─── Load active openrc from session ──────────────────────────────────────────
+_load_active_openrc() {
+  local _profile="${SESSION_DIR}/active-profile.env"
+  if [[ ! -f "$_profile" ]]; then
+    util_log_error "No active OpenRC profile found."
+    util_log_error "→ Run: Settings → Load OpenRC & Validate Auth first"
+    return 1
+  fi
   # shellcheck disable=SC1090
-  source "$OPENRC_FILE"
-  util_log_info "Sourced openrc: $OPENRC_FILE"
-else
-  util_log_warn "openrc not found: $OPENRC_FILE"
+  source "$_profile"
+  if [[ "${AUTH_STATUS:-}" != "ok" ]]; then
+    util_log_error "OpenRC profile auth status is not 'ok' (status=${AUTH_STATUS:-unknown})"
+    util_log_error "→ Re-run: Settings → Load OpenRC & Validate Auth"
+    return 1
+  fi
+  local _openrc_path="${ACTIVE_OPENRC:-}"
+  if [[ -z "$_openrc_path" || ! -f "$_openrc_path" ]]; then
+    util_log_error "ACTIVE_OPENRC path invalid or missing: ${_openrc_path:-<empty>}"
+    return 1
+  fi
+  unset OS_INSECURE OPENSTACK_INSECURE 2>/dev/null || true
+  # shellcheck disable=SC1090
+  source "$_openrc_path"
+  [[ "${OS_INSECURE:-false}" == "true" ]] && export OS_INSECURE="true"
+  util_log_info "Sourced openrc from active profile: $(basename "$_openrc_path")"
+}
+
+if ! _load_active_openrc; then
+  state_mark_failed "$PHASE" "$OS_FAMILY" "$VERSION"
+  exit 1
 fi
 
 # ─── Load publish policy config ───────────────────────────────────────────────
@@ -229,6 +251,14 @@ EOF
 )"
 state_write_runtime_json "$PHASE" "$OS_FAMILY" "$VERSION" "$STATE_JSON"
 state_mark_ready "$PHASE" "$OS_FAMILY" "$VERSION"
+
+# Source guest config เพื่อให้ GUEST_OS_FAMILY และ GUEST_OS_NAME ถูกต้อง
+_GUEST_CFG_DEFAULT="${GUEST_CONFIG_DIR}/${OS_FAMILY}/default.env"
+_GUEST_CFG_VERSION="${GUEST_CONFIG_DIR}/${OS_FAMILY}/${VERSION}.env"
+# shellcheck disable=SC1090
+[[ -f "$_GUEST_CFG_DEFAULT" ]] && source "$_GUEST_CFG_DEFAULT"
+# shellcheck disable=SC1090
+[[ -f "$_GUEST_CFG_VERSION" ]] && source "$_GUEST_CFG_VERSION"
 
 # Auto-promote guest config if this version is newer than default
 if declare -f _auto_promote_guest_config > /dev/null 2>&1; then

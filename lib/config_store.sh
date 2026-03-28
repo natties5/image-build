@@ -132,18 +132,25 @@ _auto_promote_guest_config() {
   repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
   cd "$repo_root"
 
-  if git diff --quiet "$default_env" 2>/dev/null; then
-    util_log_info "  promote: default.env unchanged (same content) — no commit needed"
-  else
+  # git diff ไม่เห็น untracked file → ใช้ git status --porcelain แทน
+  if git status --porcelain "$default_env" 2>/dev/null | grep -q .; then
+    # มีการเปลี่ยนแปลง (modified หรือ untracked) → commit
     git add "$default_env"
-    git commit -m "auto-promote: ${os_name} ${version} → default.env
+    git \
+      -c user.email="pipeline@image-build.local" \
+      -c user.name="image-build pipeline" \
+      commit \
+      -m "auto-promote: ${os_name} ${version} → default.env
 
 Pipeline passed completely (publish.ready exists).
 Previous default version: ${current_default_ver}
 New default version: ${version}
 Promoted by: _auto_promote_guest_config" \
-      --no-verify 2>/dev/null || true
+      --no-verify 2>/dev/null \
+      || util_log_warn "  promote: git commit failed (not a git repo, or other error)"
     util_log_info "  promote committed: ${os_name} ${version} → default.env"
+  else
+    util_log_info "  promote: default.env unchanged — no commit needed"
   fi
 
   return 0
