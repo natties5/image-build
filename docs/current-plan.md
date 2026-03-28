@@ -35,16 +35,46 @@
 ## Core rules
 - ห้าม download จริงก่อนมี dry-run plan
 - ห้าม execute จริงโดย resolve source ใหม่เอง
-- ห้ามใช้ version ที่ไม่ผ่าน canonical + policy
+- ห้ามใช้ version ที่ไม่ผ่าน canonical + policy + min_version guard
 - ห้าม reuse cache ข้าม source/version/arch/checksum แบบไม่มี identity guard
 - host ต้องอยู่ใน allowlist
 
 ---
 
+## Configuration Structure
+
+Config ถูกแบ่งเป็น 2 ระดับ:
+
+### Global Config (`config/sync-config.json`)
+เก็บ global/shared settings:
+- version
+- state_root, cache_root, log_root, report_root
+- request_timeout_seconds
+- allowed_hosts
+- user_agent
+
+### Per-OS Config (`config/os/*.json`)
+แยกตาม OS แต่ละตัว (ubuntu.json, debian.json):
+- os: ชื่อ OS
+- min_version: minimum supported version
+- aliases: version aliases (e.g., jammy -> 22.04)
+- architectures: arch mappings
+- sources: version-specific listing/checksum settings
+
+---
+
+## Loader Behavior
+1. อ่าน global config จาก `config/sync-config.json`
+2. อ่านทุก per-OS config จาก `config/os/*.json`
+3. Merge เข้าเป็น runtime config structure เดียว
+4. ใช้สำหรับ validation, discovery, execution
+
+---
+
 ## Current flow
 input
--> normalize
--> validate
+-> normalize (canonical_os, canonical_version, canonical_arch)
+-> validate (min_version guard)
 -> policy lookup
 -> official listing fetch
 -> strict candidate selection
@@ -86,9 +116,9 @@ py tools\sync\sync_image.py --execute --plan-id <plan_id>
 
 รอบนี้ phase ที่พร้อมใช้งานแล้วคือ:
 - phase 0 input normalization (รองรับ alias, reject invalid inputs)
-- phase 1 policy loading (Ubuntu 20.04/22.04/24.04, Debian 12/13)
+- phase 1 policy loading (split config: global + per-OS)
 - phase 2 official listing discovery
-- phase 3 checksum planning + strict candidate guard
+- phase 3 checksum planning + strict candidate guard + min_version guard
 - phase 4 dry-run state persistence
 - phase 5 cache HIT/MISS/INVALID/STALE + stale cache detection
 - phase 6 controlled download พร้อม progress MB/s + ETA + partial cleanup + retry policy
@@ -105,13 +135,15 @@ py tools\sync\sync_image.py --execute --plan-id <plan_id>
 - Retry policy สำหรับ failed downloads (3 attempts with exponential backoff)
 - Timeout handling improvements (URLError, HTTPError, TimeoutError)
 - Checksum mismatch test fixture
+- **Config split: global + per-OS files**
+- **min_version guard for version validation**
 
 ### OS Coverage
-- Ubuntu 20.04 LTS (focal)
-- Ubuntu 22.04 LTS (jammy)
-- Ubuntu 24.04 LTS (noble)
-- Debian 12 (bookworm)
-- Debian 13 (trixie)
+- Ubuntu 20.04 LTS (focal) - min_version: 20.04
+- Ubuntu 22.04 LTS (jammy) - min_version: 20.04
+- Ubuntu 24.04 LTS (noble) - min_version: 20.04
+- Debian 12 (bookworm) - min_version: 12
+- Debian 13 (trixie) - min_version: 12
 
 ### Architecture Support
 - amd64 (x86_64)
@@ -120,6 +152,7 @@ py tools\sync\sync_image.py --execute --plan-id <plan_id>
 ### Error Handling
 - Unsupported OS: แสดงรายการ OS ที่รองรับ
 - Unsupported version: clear error message
+- Below min_version: early rejection with clear message
 - Missing plan-id: usage hint
 - Bad plan-id: suggestion to run dry-run first
 
