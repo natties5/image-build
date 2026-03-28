@@ -27,6 +27,8 @@
 - สร้าง dry-run plan.json ที่ใช้ execute ต่อได้
 - execute ต้องใช้ plan.json เท่านั้น
 - cache ต้องผูกกับ source/version/arch/checksum
+- download มี progress MB/s และ ETA
+- cleanup partial files อัตโนมัติเมื่อ fail/cancel
 
 ---
 
@@ -50,6 +52,7 @@ input
 -> dry-run plan
 -> cache decision
 -> execute from plan.json only
+-> verify checksum
 
 ---
 
@@ -58,6 +61,9 @@ input
 Dry-run:
 ```bash
 py tools\sync\sync_image.py ubuntu 22.04 amd64
+py tools\sync\sync_image.py ubuntu jammy amd64
+py tools\sync\sync_image.py ubuntu 20.04 amd64
+py tools\sync\sync_image.py debian 12 amd64
 ```
 
 Execute:
@@ -75,11 +81,41 @@ py tools\sync\sync_image.py --execute --plan-id <plan_id>
 ---
 
 ## Current status
+
 รอบนี้ phase ที่พร้อมใช้งานแล้วคือ:
-- phase 0 input normalization
-- phase 1 policy loading
+- phase 0 input normalization (รองรับ alias, reject invalid inputs)
+- phase 1 policy loading (Ubuntu 20.04/22.04/24.04, Debian 12)
 - phase 2 official listing discovery
 - phase 3 checksum planning + strict candidate guard
 - phase 4 dry-run state persistence
-- phase 5 cache HIT/MISS/INVALID แบบเบื้องต้น
-- phase 6 controlled download จาก plan.json
+- phase 5 cache HIT/MISS/INVALID
+- phase 6 controlled download พร้อม progress MB/s + ETA + partial cleanup
+
+### Improvements Added
+- Download progress แสดง MB/s และ ETA
+- Automatic cleanup ของ `.partial` files เมื่อ fail หรือถูก interrupt
+- Signal handling สำหรับ Ctrl+C interrupt
+- Error messages ที่ user-friendly พร้อม hints
+- รองรับ Ubuntu 20.04 (focal) เพิ่ม
+
+### OS Coverage
+- Ubuntu 20.04 LTS (focal)
+- Ubuntu 22.04 LTS (jammy)
+- Ubuntu 24.04 LTS (noble)
+- Debian 12 (bookworm)
+
+### Architecture Support
+- amd64 (x86_64)
+- arm64 (aarch64)
+
+### Error Handling
+- Unsupported OS: แสดงรายการ OS ที่รองรับ
+- Unsupported version: clear error message
+- Missing plan-id: usage hint
+- Bad plan-id: suggestion to run dry-run first
+
+### Remaining Gaps
+- stale cache detection (เมื่อ checksum หรือ source เปลี่ยน)
+- retry policy สำหรับ network failures
+- timeout handling improvements
+- cross-check กับ upstream metadata เพิ่มเติม

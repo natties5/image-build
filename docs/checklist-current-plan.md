@@ -13,15 +13,16 @@
 - [x] normalize os ได้
 - [x] normalize version alias ได้
 - [x] normalize architecture ได้
-- [ ] validate input edge cases ครบ
-- [ ] reject invalid combinations ครบทุกกรณี
+- [x] validate input edge cases (unsupported os/version/arch)
+- [x] reject invalid combinations ครบทุกกรณี
 
 ## Phase 1: Policy loading and source mapping
 - [x] โหลด `config/sync-config.json` ได้
 - [x] map OS/version ไป source policy ได้
 - [x] map alias ไป canonical version ได้
 - [x] มี host allowlist
-- [ ] coverage ของ OS/source ยังไม่ครบ
+- [x] coverage Ubuntu 20.04, 22.04, 24.04
+- [x] coverage Debian 12
 
 ## Phase 2: Source discovery
 - [x] มี source listing URL ใน policy
@@ -48,6 +49,7 @@
 - [x] มี cache identity จาก source/version/arch/checksum
 - [x] detect HIT / MISS / INVALID แบบเบื้องต้น
 - [x] bind cache กับ checksum/source/version/arch
+- [ ] stale cache detection
 
 ## Phase 6: Controlled download
 - [x] block download ถ้ายังไม่มี dry-run ด้วย `--plan-id`
@@ -55,3 +57,41 @@
 - [x] verify checksum หลังโหลด
 - [x] write run.json
 - [x] write logs.jsonl
+- [x] download progress MB/s และ ETA
+- [x] cleanup `.partial` เมื่อ fail/cancel
+- [ ] retry policy
+- [ ] timeout handling improvements
+
+---
+
+## Test Results
+
+### Positive Tests
+- [x] ubuntu 20.04 amd64 dry-run
+- [x] ubuntu 22.04 amd64 dry-run
+- [x] ubuntu 24.04 amd64 dry-run
+- [x] ubuntu jammy alias dry-run
+- [x] ubuntu focal alias dry-run
+- [x] ubuntu noble alias dry-run
+- [x] debian 12 amd64 dry-run
+- [x] debian bookworm alias dry-run
+
+### Negative Tests
+- [x] unsupported os (centos)
+- [x] unsupported version (ubuntu 18.04)
+- [x] unsupported arch (ppc64le)
+- [x] missing plan-id
+- [x] bad plan-id
+
+### Error Handling
+- [x] user-friendly error messages
+- [x] supported OS list on invalid os error
+- [x] hint to run dry-run first on plan not found
+
+---
+
+## Remaining Gaps
+- stale cache detection (checksum/source changes)
+- retry policy for failed downloads
+- timeout handling improvements
+- cross-check with extra upstream metadata
