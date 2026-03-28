@@ -152,6 +152,10 @@ fi
 util_log_info "--- Phase 3: Baseline Repo Test ---"
 if [[ "${GUEST_REPO_DRIVER:-apt}" == "dnf-repo" ]]; then
   _BL_CMD="${GUEST_REPO_BASELINE_UPDATE_COMMAND:-dnf clean all && dnf -y makecache}"
+elif [[ "${GUEST_REPO_DRIVER:-apt}" == "apk" ]]; then
+  _BL_CMD="${GUEST_REPO_BASELINE_UPDATE_COMMAND:-apk update}"
+elif [[ "${GUEST_REPO_DRIVER:-apt}" == "pacman" ]]; then
+  _BL_CMD="${GUEST_REPO_BASELINE_UPDATE_COMMAND:-pacman -Sy --noconfirm}"
 else
   _BL_CMD="${GUEST_REPO_BASELINE_UPDATE_COMMAND:-apt-get update}"
 fi

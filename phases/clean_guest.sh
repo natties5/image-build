@@ -155,6 +155,26 @@ if [[ "$_REPO_DRIVER" == "dnf-repo" ]]; then
     fi
   " 2>&1)" || _RESTORE_OUT="restore-ssh-fail"
   util_log_info "  [repo-restore] $_RESTORE_OUT"
+elif [[ "$_REPO_DRIVER" == "apk" ]]; then
+  _RESTORE_OUT="$(_gssh "
+    if [ -f ${_BACKUP_DIR}/repositories ]; then
+      cp ${_BACKUP_DIR}/repositories /etc/apk/repositories 2>/dev/null || true
+      echo repo-restored-ok
+    else
+      echo repo-backup-not-found-skipping
+    fi
+  " 2>&1)" || _RESTORE_OUT="restore-ssh-fail"
+  util_log_info "  [repo-restore] $_RESTORE_OUT"
+elif [[ "$_REPO_DRIVER" == "pacman" ]]; then
+  _RESTORE_OUT="$(_gssh "
+    if [ -f ${_BACKUP_DIR}/mirrorlist ]; then
+      cp ${_BACKUP_DIR}/mirrorlist /etc/pacman.d/mirrorlist 2>/dev/null || true
+      echo repo-restored-ok
+    else
+      echo repo-backup-not-found-skipping
+    fi
+  " 2>&1)" || _RESTORE_OUT="restore-ssh-fail"
+  util_log_info "  [repo-restore] $_RESTORE_OUT"
 else
   _RESTORE_OUT="$(_gssh "
     if ls ${_BACKUP_DIR}/ 2>/dev/null | grep -qE '\.(list|sources)'; then

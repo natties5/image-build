@@ -803,6 +803,7 @@ _settings_edit_guest_access() {
   local cur_private_key="" cur_auth_key=""
   local cur_enable_root="yes" cur_permit_root="yes"
   local cur_pass_auth="yes" cur_pubkey_auth="yes"
+  local cur_kbd_auth="no"
   if [[ -f "$guest_env" ]]; then
     # shellcheck disable=SC1090
     source "$guest_env" 2>/dev/null || true
@@ -816,6 +817,7 @@ _settings_edit_guest_access() {
     cur_permit_root="${SSH_PERMIT_ROOT_LOGIN:-yes}"
     cur_pass_auth="${SSH_PASSWORD_AUTH:-yes}"
     cur_pubkey_auth="${SSH_PUBKEY_AUTH:-yes}"
+    cur_kbd_auth="${SSH_KBD_INTERACTIVE_AUTH:-no}"
   fi
 
   echo ""
@@ -927,6 +929,7 @@ _settings_edit_guest_access() {
   local new_permit_root="$cur_permit_root"
   local new_pass_auth="$cur_pass_auth"
   local new_pubkey_auth="$cur_pubkey_auth"
+  local new_kbd_auth="$cur_kbd_auth"
 
   echo ""
   echo "  Root SSH Policy (current values):"
@@ -934,16 +937,18 @@ _settings_edit_guest_access() {
   printf "    %-26s: %s\n" "SSH_PERMIT_ROOT_LOGIN" "${cur_permit_root:-yes}"
   printf "    %-26s: %s\n" "SSH_PASSWORD_AUTH"     "${cur_pass_auth:-yes}"
   printf "    %-26s: %s\n" "SSH_PUBKEY_AUTH"       "${cur_pubkey_auth:-yes}"
+  printf "    %-26s: %s\n" "SSH_KBD_INTERACTIVE_AUTH" "${cur_kbd_auth:-no}"
   echo -n "  Change policy? [y/N]: "
   local ch; read -r ch || ch=""
   if [[ "${ch,,}" == "y" ]]; then
     local pol_var pol_cur pol_val
-    for pol_var in ENABLE_ROOT_SSH SSH_PERMIT_ROOT_LOGIN SSH_PASSWORD_AUTH SSH_PUBKEY_AUTH; do
+    for pol_var in ENABLE_ROOT_SSH SSH_PERMIT_ROOT_LOGIN SSH_PASSWORD_AUTH SSH_PUBKEY_AUTH SSH_KBD_INTERACTIVE_AUTH; do
       case "$pol_var" in
         ENABLE_ROOT_SSH)       pol_cur="$new_enable_root" ;;
         SSH_PERMIT_ROOT_LOGIN) pol_cur="$new_permit_root" ;;
         SSH_PASSWORD_AUTH)     pol_cur="$new_pass_auth" ;;
         SSH_PUBKEY_AUTH)       pol_cur="$new_pubkey_auth" ;;
+        SSH_KBD_INTERACTIVE_AUTH) pol_cur="$new_kbd_auth" ;;
       esac
       while true; do
         printf "  %s [yes/no] (keep: %s): " "$pol_var" "${pol_cur:-yes}"
@@ -962,6 +967,7 @@ _settings_edit_guest_access() {
         SSH_PERMIT_ROOT_LOGIN) new_permit_root="$pol_val" ;;
         SSH_PASSWORD_AUTH)     new_pass_auth="$pol_val" ;;
         SSH_PUBKEY_AUTH)       new_pubkey_auth="$pol_val" ;;
+        SSH_KBD_INTERACTIVE_AUTH) new_kbd_auth="$pol_val" ;;
       esac
     done
   fi
@@ -983,6 +989,7 @@ ENABLE_ROOT_SSH="${new_enable_root}"
 SSH_PERMIT_ROOT_LOGIN="${new_permit_root}"
 SSH_PASSWORD_AUTH="${new_pass_auth}"
 SSH_PUBKEY_AUTH="${new_pubkey_auth}"
+SSH_KBD_INTERACTIVE_AUTH="${new_kbd_auth}"
 EOF
   echo ""
   echo "  ✓ Guest access saved to settings/guest-access.env"
