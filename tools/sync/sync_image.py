@@ -3,11 +3,46 @@ import argparse
 import hashlib
 import html.parser
 import json
+import signal
 import sys
 import urllib.request
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
+
+
+class DownloadInterruptedError(Exception):
+    """Raised when download is interrupted by user or signal"""
+    pass
+
+
+# Global flag for signal handling
+_interrupted = False
+
+
+def _signal_handler(signum, frame):
+    global _interrupted
+    _interrupted = True
+    print("\n[INTERRUPTED] Cleaning up...", file=sys.stderr)
+
+
+@contextmanager
+def download_cleanup_context(tmp_file: Path):
+    """Context manager that cleans up partial file on failure or interrupt"""
+    global _interrupted
+    try:
+        yield
+    except (DownloadInterruptedError, KeyboardInterrupt):
+        print(f"\n[CLEANUP] Removing partial file: {tmp_file}")
+        if tmp_file.exists():
+            tmp_file.unlink()
+        raise
+    except Exception:
+        print(f"\n[CLEANUP] Removing partial file due to error: {tmp_file}")
+        if tmp_file.exists():
+            tmp_file.unlink()
+        raise
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -257,12 +292,15 @@ def stream_download_with_progress(url: str, destination: Path, algorithm: str, c
     ensure_allowed_host(url, cfg)
     req = urllib.request.Request(url, headers={"User-Agent": cfg["user_agent"]})
     hasher = hashlib.new(algorithm)
+    start_time = datetime.now(timezone.utc)
 
     with urllib.request.urlopen(req, timeout=cfg.get("request_timeout_seconds", 30)) as response:
         total = response.headers.get("Content-Length")
         total_bytes = int(total) if total else 0
         downloaded = 0
         last_percent = -1
+        last_update_time = start_time
+        last_downloaded = 0
 
         with destination.open("wb") as f:
             while True:
@@ -273,25 +311,61 @@ def stream_download_with_progress(url: str, destination: Path, algorithm: str, c
                 hasher.update(chunk)
                 downloaded += len(chunk)
 
+                now = datetime.now(timezone.utc)
+                elapsed_since_update = (now - last_update_time).total_seconds()
+
                 if total_bytes > 0:
                     percent = int(downloaded * 100 / total_bytes)
-                    if percent != last_percent:
+                    if percent != last_percent or elapsed_since_update >= 1.0:
+                        mb = downloaded / (1024 * 1024)
+                        total_mb = total_bytes / (1024 * 1024)
+
+                        speed_mbps = 0
+                        if elapsed_since_update > 0:
+                            bytes_delta = downloaded - last_downloaded
+                            speed_mbps = (bytes_delta / (1024 * 1024)) / elapsed_since_update
+
+                        eta_str = ""
+                        remaining = total_bytes - downloaded
+                        if speed_mbps > 0 and remaining > 0:
+                            eta_sec = remaining / (speed_mbps * 1024 * 1024)
+                            eta_min = int(eta_sec // 60)
+                            eta_sec_remain = int(eta_sec % 60)
+                            eta_str = f" | ETA: {eta_min}m {eta_sec_remain}s"
+
                         print(
                             f"Downloading... {percent:3d}% "
-                            f"({downloaded:,}/{total_bytes:,} bytes)",
+                            f"({mb:.1f}/{total_mb:.1f} MB) "
+                            f"@ {speed_mbps:.1f} MB/s{eta_str}",
                             end="\r",
                             flush=True,
                         )
                         last_percent = percent
+                        last_update_time = now
+                        last_downloaded = downloaded
                 else:
-                    print(f"Downloading... {downloaded:,} bytes", end="\r", flush=True)
+                    if elapsed_since_update >= 1.0:
+                        speed_mbps = 0
+                        if elapsed_since_update > 0:
+                            bytes_delta = downloaded - last_downloaded
+                            speed_mbps = (bytes_delta / (1024 * 1024)) / elapsed_since_update
+                        print(
+                            f"Downloading... {downloaded:,} bytes @ {speed_mbps:.1f} MB/s",
+                            end="\r",
+                            flush=True,
+                        )
+                        last_update_time = now
+                        last_downloaded = downloaded
 
-    print(" " * 80, end="\r")
-    print(f"Download complete: {downloaded:,} bytes")
+    duration = (datetime.now(timezone.utc) - start_time).total_seconds()
+    avg_speed = (downloaded / (1024 * 1024)) / duration if duration > 0 else 0
+    print(" " * 100, end="\r")
+    print(f"Download complete: {downloaded:,} bytes ({avg_speed:.1f} MB/s avg)")
     return hasher.hexdigest(), downloaded
 
 
 def execute_from_plan(cfg: dict, plan_id: str) -> dict:
+    global _interrupted
     plan_file = REPO_ROOT / cfg["state_root"] / plan_id / "plan.json"
     if not plan_file.exists():
         raise FileNotFoundError(f"plan not found: {plan_file}")
@@ -328,42 +402,57 @@ def execute_from_plan(cfg: dict, plan_id: str) -> dict:
     cache_file.parent.mkdir(parents=True, exist_ok=True)
     tmp_file = cache_file.with_suffix(cache_file.suffix + ".partial")
 
-    actual_checksum, total_bytes = stream_download_with_progress(
-        url=plan["resolved"]["download_url"],
-        destination=tmp_file,
-        algorithm=plan["resolved"]["checksum_algorithm"],
-        cfg=cfg,
-    )
+    # Check for existing partial file and clean it
+    if tmp_file.exists():
+        print(f"[INFO] Cleaning up stale partial file: {tmp_file}")
+        tmp_file.unlink()
 
-    expected_checksum = plan["resolved"]["expected_checksum"]
-    if actual_checksum.lower() != expected_checksum.lower():
-        tmp_file.unlink(missing_ok=True)
-        raise RuntimeError("checksum mismatch")
+    # Register signal handler for clean interrupt
+    old_sigint = signal.signal(signal.SIGINT, _signal_handler)
 
-    tmp_file.replace(cache_file)
-    meta = {
-        "plan_id": plan_id,
-        "stored_at": utc_now(),
-        "checksum_algorithm": plan["resolved"]["checksum_algorithm"],
-        "checksum": actual_checksum,
-        "source_url": plan["resolved"]["download_url"],
-        "filename": plan["resolved"]["selected_filename"],
-        "bytes": total_bytes
-    }
-    write_json(cache_meta, meta)
+    try:
+        with download_cleanup_context(tmp_file):
+            actual_checksum, total_bytes = stream_download_with_progress(
+                url=plan["resolved"]["download_url"],
+                destination=tmp_file,
+                algorithm=plan["resolved"]["checksum_algorithm"],
+                cfg=cfg,
+            )
 
-    run = {
-        "plan_id": plan_id,
-        "executed_at": utc_now(),
-        "status": "downloaded",
-        "file": str(cache_file.relative_to(REPO_ROOT)),
-        "checksum": actual_checksum,
-        "bytes": total_bytes
-    }
-    write_json(run_file, run)
-    append_jsonl(logs_file, {"ts": utc_now(), "event": "downloaded", "plan_id": plan_id, "file": str(cache_file), "bytes": total_bytes})
-    append_jsonl(global_log, {"ts": utc_now(), "event": "downloaded", "plan_id": plan_id, "bytes": total_bytes})
-    return run
+            if _interrupted:
+                raise DownloadInterruptedError("Download interrupted by user")
+
+        expected_checksum = plan["resolved"]["expected_checksum"]
+        if actual_checksum.lower() != expected_checksum.lower():
+            tmp_file.unlink(missing_ok=True)
+            raise RuntimeError(f"checksum mismatch: expected {expected_checksum[:16]}..., got {actual_checksum[:16]}...")
+
+        tmp_file.replace(cache_file)
+        meta = {
+            "plan_id": plan_id,
+            "stored_at": utc_now(),
+            "checksum_algorithm": plan["resolved"]["checksum_algorithm"],
+            "checksum": actual_checksum,
+            "source_url": plan["resolved"]["download_url"],
+            "filename": plan["resolved"]["selected_filename"],
+            "bytes": total_bytes
+        }
+        write_json(cache_meta, meta)
+
+        run = {
+            "plan_id": plan_id,
+            "executed_at": utc_now(),
+            "status": "downloaded",
+            "file": str(cache_file.relative_to(REPO_ROOT)),
+            "checksum": actual_checksum,
+            "bytes": total_bytes
+        }
+        write_json(run_file, run)
+        append_jsonl(logs_file, {"ts": utc_now(), "event": "downloaded", "plan_id": plan_id, "file": str(cache_file), "bytes": total_bytes})
+        append_jsonl(global_log, {"ts": utc_now(), "event": "downloaded", "plan_id": plan_id, "bytes": total_bytes})
+        return run
+    finally:
+        signal.signal(signal.SIGINT, old_sigint)
 
 
 def main() -> int:
