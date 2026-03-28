@@ -5,6 +5,8 @@ import html.parser
 import json
 import signal
 import sys
+import time
+import urllib.error
 import urllib.request
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -212,12 +214,27 @@ def build_plan(cfg: dict, os_name: str, version: str, arch: str) -> dict:
 
     cache_file = paths["cache_dir"] / selected_filename
     cache_meta = paths["cache_dir"] / f"{selected_filename}.meta.json"
+    cache_status = "MISS"
+    
     if cache_file.exists() and cache_meta.exists():
-        cache_status = "HIT"
+        try:
+            with cache_meta.open("r", encoding="utf-8") as f:
+                meta = json.load(f)
+            is_stale, stale_reason = check_cache_stale(meta, {
+                "resolved": {
+                    "expected_checksum": checksum_value,
+                    "download_url": urljoin(listing_url, selected_filename),
+                    "selected_filename": selected_filename
+                }
+            })
+            if is_stale:
+                cache_status = "STALE"
+            else:
+                cache_status = "HIT"
+        except (json.JSONDecodeError, KeyError):
+            cache_status = "INVALID"
     elif cache_file.exists() and not cache_meta.exists():
         cache_status = "INVALID"
-    else:
-        cache_status = "MISS"
 
     plan = {
         "plan_id": plan_id,
@@ -288,8 +305,28 @@ def build_plan(cfg: dict, os_name: str, version: str, arch: str) -> dict:
     return plan
 
 
-def stream_download_with_progress(url: str, destination: Path, algorithm: str, cfg: dict) -> tuple[str, int]:
+def stream_download_with_progress(url: str, destination: Path, algorithm: str, cfg: dict, max_retries: int = 3) -> tuple[str, int]:
     ensure_allowed_host(url, cfg)
+    
+    last_exception = None
+    for attempt in range(max_retries):
+        if attempt > 0:
+            print(f"\n[INFO] Retrying download (attempt {attempt + 1}/{max_retries})...")
+        
+        try:
+            return _do_stream_download(url, destination, algorithm, cfg)
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as e:
+            last_exception = e
+            print(f"\n[WARN] Download attempt {attempt + 1} failed: {e}")
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)  # Exponential backoff
+            else:
+                break
+    
+    raise RuntimeError(f"Download failed after {max_retries} attempts: {last_exception}")
+
+
+def _do_stream_download(url: str, destination: Path, algorithm: str, cfg: dict) -> tuple[str, int]:
     req = urllib.request.Request(url, headers={"User-Agent": cfg["user_agent"]})
     hasher = hashlib.new(algorithm)
     start_time = datetime.now(timezone.utc)
@@ -364,6 +401,27 @@ def stream_download_with_progress(url: str, destination: Path, algorithm: str, c
     return hasher.hexdigest(), downloaded
 
 
+def check_cache_stale(meta: dict, plan: dict) -> tuple[bool, str]:
+    """
+    Check if cached metadata is stale compared to plan.
+    Returns (is_stale, reason)
+    """
+    expected_checksum = plan["resolved"]["expected_checksum"]
+    expected_url = plan["resolved"]["download_url"]
+    expected_filename = plan["resolved"]["selected_filename"]
+    
+    if meta.get("checksum") != expected_checksum:
+        return True, "checksum_changed"
+    
+    if meta.get("source_url") != expected_url:
+        return True, "source_url_changed"
+    
+    if meta.get("filename") != expected_filename:
+        return True, "filename_changed"
+    
+    return False, ""
+
+
 def execute_from_plan(cfg: dict, plan_id: str) -> dict:
     global _interrupted
     plan_file = REPO_ROOT / cfg["state_root"] / plan_id / "plan.json"
@@ -382,10 +440,26 @@ def execute_from_plan(cfg: dict, plan_id: str) -> dict:
     if plan["guards"]["dry_run_required_before_download"] is not True:
         raise RuntimeError("plan guard mismatch: dry_run_required_before_download")
 
+    cache_status = "MISS"
+    
     if cache_file.exists() and cache_meta.exists():
         with cache_meta.open("r", encoding="utf-8") as f:
             meta = json.load(f)
-        if meta.get("checksum") == plan["resolved"]["expected_checksum"]:
+        
+        is_stale, stale_reason = check_cache_stale(meta, plan)
+        
+        if is_stale:
+            cache_status = "STALE"
+            print(f"[INFO] Cache is STALE ({stale_reason}), re-downloading...")
+            # Clean up stale cache files
+            if cache_file.exists():
+                cache_file.unlink()
+            if cache_meta.exists():
+                cache_meta.unlink()
+            append_jsonl(logs_file, {"ts": utc_now(), "event": "cache_stale", "plan_id": plan_id, "reason": stale_reason})
+            append_jsonl(global_log, {"ts": utc_now(), "event": "cache_stale", "plan_id": plan_id, "reason": stale_reason})
+        elif meta.get("checksum") == plan["resolved"]["expected_checksum"]:
+            cache_status = "HIT"
             run = {
                 "plan_id": plan_id,
                 "executed_at": utc_now(),

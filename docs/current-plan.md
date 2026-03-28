@@ -63,7 +63,9 @@ Dry-run:
 py tools\sync\sync_image.py ubuntu 22.04 amd64
 py tools\sync\sync_image.py ubuntu jammy amd64
 py tools\sync\sync_image.py ubuntu 20.04 amd64
+py tools\sync\sync_image.py ubuntu 24.04 amd64
 py tools\sync\sync_image.py debian 12 amd64
+py tools\sync\sync_image.py debian 13 amd64
 ```
 
 Execute:
@@ -84,12 +86,12 @@ py tools\sync\sync_image.py --execute --plan-id <plan_id>
 
 รอบนี้ phase ที่พร้อมใช้งานแล้วคือ:
 - phase 0 input normalization (รองรับ alias, reject invalid inputs)
-- phase 1 policy loading (Ubuntu 20.04/22.04/24.04, Debian 12)
+- phase 1 policy loading (Ubuntu 20.04/22.04/24.04, Debian 12/13)
 - phase 2 official listing discovery
 - phase 3 checksum planning + strict candidate guard
 - phase 4 dry-run state persistence
-- phase 5 cache HIT/MISS/INVALID
-- phase 6 controlled download พร้อม progress MB/s + ETA + partial cleanup
+- phase 5 cache HIT/MISS/INVALID/STALE + stale cache detection
+- phase 6 controlled download พร้อม progress MB/s + ETA + partial cleanup + retry policy
 
 ### Improvements Added
 - Download progress แสดง MB/s และ ETA
@@ -97,12 +99,19 @@ py tools\sync\sync_image.py --execute --plan-id <plan_id>
 - Signal handling สำหรับ Ctrl+C interrupt
 - Error messages ที่ user-friendly พร้อม hints
 - รองรับ Ubuntu 20.04 (focal) เพิ่ม
+- รองรับ Debian 13 (trixie) เพิ่ม
+- Stale cache detection (checksum, source_url, filename changes)
+- Cache states: HIT, MISS, INVALID, STALE
+- Retry policy สำหรับ failed downloads (3 attempts with exponential backoff)
+- Timeout handling improvements (URLError, HTTPError, TimeoutError)
+- Checksum mismatch test fixture
 
 ### OS Coverage
 - Ubuntu 20.04 LTS (focal)
 - Ubuntu 22.04 LTS (jammy)
 - Ubuntu 24.04 LTS (noble)
 - Debian 12 (bookworm)
+- Debian 13 (trixie)
 
 ### Architecture Support
 - amd64 (x86_64)
@@ -115,7 +124,5 @@ py tools\sync\sync_image.py --execute --plan-id <plan_id>
 - Bad plan-id: suggestion to run dry-run first
 
 ### Remaining Gaps
-- stale cache detection (เมื่อ checksum หรือ source เปลี่ยน)
-- retry policy สำหรับ network failures
-- timeout handling improvements
 - cross-check กับ upstream metadata เพิ่มเติม
+- full integration tests with complete downloads (Smoke Pass sufficient for most cases)
