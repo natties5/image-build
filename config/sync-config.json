@@ -31,6 +31,17 @@
         "aarch64": "aarch64"
       },
       "sources": {
+        "20.04": {
+          "release_name": "focal",
+          "artifact_type": "qcow2",
+          "listing_url": "https://cloud-images.ubuntu.com/focal/current/",
+          "filename_patterns": [
+            "focal-server-cloudimg-amd64.img",
+            "focal-server-cloudimg-arm64.img"
+          ],
+          "checksum_file": "SHA256SUMS",
+          "checksum_algorithm": "sha256"
+        },
         "22.04": {
           "release_name": "jammy",
           "artifact_type": "qcow2",

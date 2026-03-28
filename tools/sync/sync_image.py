@@ -468,18 +468,34 @@ def main() -> int:
 
     if args.execute:
         if not args.plan_id:
-            raise SystemExit("--execute requires --plan-id")
-        run = execute_from_plan(cfg, args.plan_id)
-        print("[EXECUTE OK]")
-        print(json.dumps(run, indent=2, ensure_ascii=False))
-        return 0
+            print("[ERROR] --execute requires --plan-id", file=sys.stderr)
+            print("Usage: sync_image.py --execute --plan-id <plan-id>", file=sys.stderr)
+            return 1
+        try:
+            run = execute_from_plan(cfg, args.plan_id)
+            print("[EXECUTE OK]")
+            print(json.dumps(run, indent=2, ensure_ascii=False))
+            return 0
+        except FileNotFoundError as e:
+            print(f"[ERROR] {e}", file=sys.stderr)
+            print("Hint: Run dry-run first to create a plan", file=sys.stderr)
+            return 1
+        except RuntimeError as e:
+            print(f"[ERROR] {e}", file=sys.stderr)
+            return 1
 
     if not args.os or not args.version:
-        raise SystemExit("usage: sync_image.py <os> <version> [arch] OR sync_image.py --execute --plan-id <id>")
+        parser.print_help()
+        return 1
 
-    os_name = canonical_os(cfg, args.os)
-    version = canonical_version(cfg, os_name, args.version)
-    arch = canonical_arch(cfg, os_name, args.arch)
+    try:
+        os_name = canonical_os(cfg, args.os)
+        version = canonical_version(cfg, os_name, args.version)
+        arch = canonical_arch(cfg, os_name, args.arch)
+    except ValueError as e:
+        print(f"[ERROR] {e}", file=sys.stderr)
+        print(f"Supported OS: {', '.join(cfg.get('default_os', {}).keys())}", file=sys.stderr)
+        return 1
 
     plan = build_plan(cfg, os_name, version, arch)
     print("[DRY-RUN OK]")
