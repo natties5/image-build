@@ -167,10 +167,14 @@ def strict_candidate_select(links: list[str], patterns: list[str], arch: str) ->
         name = link.strip()
         if not name:
             continue
+        # Skip checksum and metadata files
+        if name.endswith('.CHECKSUM') or name.endswith('.asc') or name.endswith('.sig'):
+            continue
         for pattern in patterns:
-            if arch == "x86_64" and "amd64" not in pattern:
+            # Check if pattern matches arch (supports amd64/x86_64 and arm64/aarch64 naming)
+            if arch == "x86_64" and not any(x in pattern for x in ["amd64", "x86_64"]):
                 continue
-            if arch == "aarch64" and "arm64" not in pattern:
+            if arch == "aarch64" and not any(x in pattern for x in ["arm64", "aarch64"]):
                 continue
             if pattern in name:
                 candidates.append(name)
@@ -183,12 +187,22 @@ def strict_candidate_select(links: list[str], patterns: list[str], arch: str) ->
 
 def parse_checksum(checksum_text: str, filename: str) -> str:
     for line in checksum_text.splitlines():
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
         if filename not in line:
             continue
+        # Handle standard format: "hash filename" (Ubuntu/Debian)
         parts = line.split()
         if not parts:
             continue
-        return parts[0]
+        # Check if it's the "SHA256 (filename) = hash" format (Rocky/AlmaLinux)
+        if parts[0] in ("SHA256", "SHA512") and len(parts) >= 4 and parts[1].startswith("("):
+            # Format: SHA256 (filename) = hash
+            return parts[-1]
+        # Standard format: hash filename
+        if parts[0] != filename:
+            return parts[0]
     raise RuntimeError(f"checksum not found for {filename}")
 
 
