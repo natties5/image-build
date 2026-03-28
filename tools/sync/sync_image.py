@@ -49,6 +49,7 @@ def download_cleanup_context(tmp_file: Path):
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = REPO_ROOT / "config" / "sync-config.json"
+OS_CONFIG_DIR = REPO_ROOT / "config" / "os"
 CHUNK_SIZE = 4 * 1024 * 1024
 
 
@@ -66,8 +67,21 @@ class LinkParser(html.parser.HTMLParser):
 
 
 def load_config() -> dict:
+    """Load global config and merge with all per-OS configs from config/os/"""
     with CONFIG_PATH.open("r", encoding="utf-8") as f:
-        return json.load(f)
+        cfg = json.load(f)
+    
+    # Load per-OS configs
+    cfg["os_configs"] = {}
+    if OS_CONFIG_DIR.exists():
+        for os_file in OS_CONFIG_DIR.glob("*.json"):
+            with os_file.open("r", encoding="utf-8") as f:
+                os_cfg = json.load(f)
+                os_name = os_cfg.get("os")
+                if os_name:
+                    cfg["os_configs"][os_name] = os_cfg
+    
+    return cfg
 
 
 def utc_now() -> str:
@@ -89,25 +103,52 @@ def http_get_text(url: str, cfg: dict) -> str:
 
 def canonical_os(config: dict, os_name: str) -> str:
     value = os_name.strip().lower()
-    if value not in config["default_os"]:
+    if value not in config["os_configs"]:
         raise ValueError(f"unsupported os: {os_name}")
     return value
 
 
 def canonical_version(config: dict, os_name: str, version: str) -> str:
     value = version.strip().lower()
-    os_cfg = config["default_os"][os_name]
+    os_cfg = config["os_configs"][os_name]
     aliases = os_cfg.get("aliases", {})
+    
+    # Resolve alias to canonical version
+    canonical = None
     if value in aliases:
-        return aliases[value]
-    if value in os_cfg.get("sources", {}):
-        return value
-    raise ValueError(f"unsupported version for {os_name}: {version}")
+        canonical = aliases[value]
+    elif value in os_cfg.get("sources", {}):
+        canonical = value
+    else:
+        raise ValueError(f"unsupported version for {os_name}: {version}")
+    
+    # Check min_version guard
+    min_version = os_cfg.get("min_version")
+    if min_version:
+        # For Ubuntu: compare as floats (20.04 < 22.04)
+        # For Debian: compare as integers (11 < 12)
+        try:
+            if "." in str(min_version):
+                # Ubuntu-style version comparison
+                if float(canonical) < float(min_version):
+                    raise ValueError(f"version {version} ({canonical}) is below minimum supported version {min_version} for {os_name}")
+            else:
+                # Debian-style version comparison
+                if int(canonical) < int(min_version):
+                    raise ValueError(f"version {version} ({canonical}) is below minimum supported version {min_version} for {os_name}")
+        except ValueError as e:
+            if "below minimum" in str(e):
+                raise
+            # If conversion fails, fall back to string comparison
+            if str(canonical) < str(min_version):
+                raise ValueError(f"version {version} ({canonical}) is below minimum supported version {min_version} for {os_name}")
+    
+    return canonical
 
 
 def canonical_arch(config: dict, os_name: str, arch: str) -> str:
     value = arch.strip().lower()
-    os_cfg = config["default_os"][os_name]
+    os_cfg = config["os_configs"][os_name]
     arch_map = os_cfg.get("architectures", {})
     if value not in arch_map:
         raise ValueError(f"unsupported arch for {os_name}: {arch}")
@@ -187,7 +228,7 @@ def build_paths(cfg: dict, os_name: str, release_name: str, arch: str, artifact_
 
 
 def build_plan(cfg: dict, os_name: str, version: str, arch: str) -> dict:
-    src = cfg["default_os"][os_name]["sources"][version]
+    src = cfg["os_configs"][os_name]["sources"][version]
     listing_url = src["listing_url"]
     listing_html = http_get_text(listing_url, cfg)
     links = parse_listing_links(listing_html)
@@ -568,7 +609,7 @@ def main() -> int:
         arch = canonical_arch(cfg, os_name, args.arch)
     except ValueError as e:
         print(f"[ERROR] {e}", file=sys.stderr)
-        print(f"Supported OS: {', '.join(cfg.get('default_os', {}).keys())}", file=sys.stderr)
+        print(f"Supported OS: {', '.join(cfg.get('os_configs', {}).keys())}", file=sys.stderr)
         return 1
 
     plan = build_plan(cfg, os_name, version, arch)
