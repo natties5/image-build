@@ -66,7 +66,12 @@
 
 ## Test Results
 
-### Positive Tests
+### Positive Tests (Execute)
+- [x] debian 12 amd64 execute (verified download starts)
+- [x] ubuntu 20.04 amd64 execute (verified download starts)
+- [x] ubuntu 24.04 amd64 execute (verified download starts)
+
+### Positive Tests (Dry-run)
 - [x] ubuntu 20.04 amd64 dry-run
 - [x] ubuntu 22.04 amd64 dry-run
 - [x] ubuntu 24.04 amd64 dry-run
@@ -76,17 +81,25 @@
 - [x] debian 12 amd64 dry-run
 - [x] debian bookworm alias dry-run
 
+### Cache Tests
+- [x] cache hit (second run) - status: cached
+- [x] cache miss (first run) - status: MISS
+
 ### Negative Tests
 - [x] unsupported os (centos)
 - [x] unsupported version (ubuntu 18.04)
 - [x] unsupported arch (ppc64le)
 - [x] missing plan-id
 - [x] bad plan-id
+- [x] candidate ambiguity (3/3 unit tests passed)
 
 ### Error Handling
 - [x] user-friendly error messages
 - [x] supported OS list on invalid os error
 - [x] hint to run dry-run first on plan not found
+
+### Test Infrastructure
+- [x] ambiguity test harness (tools/sync/fixtures/test_ambiguity.py)
 
 ---
 
@@ -95,3 +108,4 @@
 - retry policy for failed downloads
 - timeout handling improvements
 - cross-check with extra upstream metadata
+- full checksum mismatch integration test (requires download completion)
