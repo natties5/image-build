@@ -1,0 +1,79 @@
+{
+  "version": 1,
+  "state_root": "state/sync/plans",
+  "cache_root": "cache/official",
+  "log_root": "logs/sync",
+  "report_root": "reports/sync",
+  "allowed_hosts": [
+    "cloud-images.ubuntu.com",
+    "cdimage.ubuntu.com",
+    "cloud.debian.org",
+    "download.fedoraproject.org",
+    "dl.fedoraproject.org",
+    "cloud.centos.org",
+    "repo.almalinux.org",
+    "download.rockylinux.org",
+    "dl.rockylinux.org"
+  ],
+  "user_agent": "image-build-sync/1.0",
+  "default_os": {
+    "ubuntu": {
+      "aliases": {
+        "jammy": "22.04",
+        "noble": "24.04",
+        "focal": "20.04"
+      },
+      "architectures": {
+        "amd64": "x86_64",
+        "x86_64": "x86_64",
+        "arm64": "aarch64",
+        "aarch64": "aarch64"
+      },
+      "sources": {
+        "22.04": {
+          "release_name": "jammy",
+          "artifact_type": "qcow2",
+          "listing_url": "https://cloud-images.ubuntu.com/jammy/current/",
+          "filename_patterns": [
+            "jammy-server-cloudimg-amd64.img",
+            "jammy-server-cloudimg-arm64.img"
+          ],
+          "checksum_file": "SHA256SUMS"
+        },
+        "24.04": {
+          "release_name": "noble",
+          "artifact_type": "qcow2",
+          "listing_url": "https://cloud-images.ubuntu.com/noble/current/",
+          "filename_patterns": [
+            "noble-server-cloudimg-amd64.img",
+            "noble-server-cloudimg-arm64.img"
+          ],
+          "checksum_file": "SHA256SUMS"
+        }
+      }
+    },
+    "debian": {
+      "aliases": {
+        "bookworm": "12"
+      },
+      "architectures": {
+        "amd64": "x86_64",
+        "x86_64": "x86_64",
+        "arm64": "aarch64",
+        "aarch64": "aarch64"
+      },
+      "sources": {
+        "12": {
+          "release_name": "bookworm",
+          "artifact_type": "qcow2",
+          "listing_url": "https://cloud.debian.org/images/cloud/bookworm/latest/",
+          "filename_patterns": [
+            "debian-12-generic-amd64.qcow2",
+            "debian-12-generic-arm64.qcow2"
+          ],
+          "checksum_file": "SHA512SUMS"
+        }
+      }
+    }
+  }
+}
