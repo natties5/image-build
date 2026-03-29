@@ -1,5 +1,41 @@
 # Sync Image Plan (Phase 0–6 Only)
 
+## Overview
+
+This document describes the image synchronization system with a new **central CLI menu** (`image`) that provides a unified interface for managing OS images across subsystems.
+
+### Central Image Menu
+
+The central menu is located in a neutral/shared path at `tools/image/` and provides:
+
+- **image sync** - Check targets, resolve sources, create/update plans (dry-run)
+- **image pull** - Download images from existing plans only
+- **image status** - Show current status table of all OS/versions
+- **image setting** - Configure per-OS behavior interactively
+- **image clean** - Remove plans, cache, and downloaded images
+
+The menu acts as a neutral front-end that connects to the current sync subsystem while remaining extensible for future features.
+
+### Menu Flow
+
+```
+config → sync → pull → status → clean
+```
+
+1. **sync** checks all targets, resolves upstream sources, and creates plans (no download)
+2. **pull** downloads images only from existing plans (plan-driven execution)
+3. **status** shows the current state of all OS/versions
+4. **setting** configures per-OS policies interactively
+5. **clean** removes plans, cache, and downloaded images for selected targets
+
+### Key Design Principles
+
+- **Neutral path**: Menu lives in `tools/image/` to be shared across subsystems
+- **Plan-driven**: `pull` only works from existing plans created by `sync`
+- **Interactive UX**: Users select targets interactively; system reads config as source of truth
+- **Safe defaults**: No destructive operations without confirmation; Enter keeps current values
+- **Backward compatible**: Existing sync backend (`tools/sync/sync_image.py`) is preserved
+
 ## Scope
 ระบบนี้โฟกัสเฉพาะ phase 0–6 ของงาน sync image:
 
@@ -109,7 +145,37 @@ input
 
 ## Run examples
 
-### Explicit Mode (all OS)
+### Central Image Menu (Recommended)
+
+The new `image` CLI provides an interactive menu system for all operations:
+
+```bash
+# Sync - create/update plans (dry-run)
+py tools/image/image_cli.py sync              # Interactive menu
+py tools/image/image_cli.py sync all          # Sync all OS
+py tools/image/image_cli.py sync ubuntu       # Sync all Ubuntu versions
+
+# Pull - download from existing plans
+py tools/image/image_cli.py pull              # Interactive menu
+py tools/image/image_cli.py pull all          # Pull all planned images
+py tools/image/image_cli.py pull ubuntu       # Pull Ubuntu from plans
+
+# Status - show current state
+py tools/image/image_cli.py status
+
+# Setting - configure per-OS behavior
+py tools/image/image_cli.py setting
+
+# Clean - remove plans and cache
+py tools/image/image_cli.py clean             # Interactive menu
+py tools/image/image_cli.py clean all         # Clean everything (requires YES confirmation)
+py tools/image/image_cli.py clean ubuntu      # Clean specific OS
+```
+
+### Legacy Direct Sync (Still Available)
+
+The original sync backend remains available for direct use:
+
 ```bash
 # Ubuntu
 py tools\sync\sync_image.py ubuntu 22.04 amd64
@@ -139,7 +205,7 @@ py tools\sync\sync_image.py debian auto amd64
 py tools\sync\sync_image.py debian latest amd64
 ```
 
-Execute:
+Execute from plan:
 ```bash
 py tools\sync\sync_image.py --execute --plan-id <plan_id>
 ```
@@ -166,6 +232,73 @@ When using auto/latest mode, the plan includes version_selection metadata:
   }
 }
 ```
+
+---
+
+## Central Image Menu Details
+
+### Architecture
+
+```
+tools/image/
+├── image_cli.py          # Central CLI entry point
+
+Legacy (preserved):
+tools/sync/
+├── sync_image.py         # Original sync backend
+```
+
+The central menu:
+- Lives in `tools/image/` as a neutral/shared path
+- Imports and wraps the existing sync backend from `tools/sync/`
+- Provides interactive menus on top of existing functionality
+- Does NOT modify the sync backend behavior
+
+### Command Reference
+
+#### image sync
+- Checks all relevant targets for the selected OS
+- Resolves upstream source/version/checksum
+- Creates/updates plans without downloading
+- Interactive OS selection (or specify OS as argument)
+- Shows summary: new, unchanged, failed, stale, ready
+
+#### image pull
+- Downloads real images from existing plans only
+- Plan-driven: no plan = no pull selection
+- Interactive OS and version selection
+- Shows confirmation summary before execution
+- Downloads with progress MB/s and ETA
+
+#### image status
+- Shows current status for each OS/version
+- Table output with: OS, Version, Status, Cache, Plan ID
+- Status values: not planned, planned, ready, stale, failed
+- Read-only in this round
+
+#### image setting
+- Configure per-OS behavior interactively
+- **Show Status**: Display all OS config in one table
+- **Setting OS**: Configure one OS at a time
+  - Press Enter to keep current value
+  - Shows current values as defaults
+  - Config saved to `config/os/<os>.json`
+
+#### image clean
+- Remove plans + cache + downloaded images
+- Three modes:
+  - `clean all`: Remove everything (requires typing 'YES')
+  - `clean <os>` → all versions: Remove all for that OS
+  - `clean <os>` → select version: Remove specific OS/version
+- Shows dry-run preview before destructive confirmation
+
+### Menu Behavior Rules
+
+1. **Interactive First**: If no arguments provided, show interactive menu
+2. **Config-Driven**: System reads config as source of truth; users select targets
+3. **Plan-Driven Pull**: Pull only works from existing plans created by sync
+4. **Safe Defaults**: Enter keeps current value in settings; destructive actions require confirmation
+5. **No Downloads in Sync**: Sync is always dry-run; only pull downloads
 
 ---
 

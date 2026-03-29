@@ -202,9 +202,89 @@
 
 ---
 
+## Central Image Menu (New)
+
+### Menu Structure
+- [x] Central menu created in neutral path `tools/image/`
+- [x] Menu commands: sync, pull, status, setting, clean
+- [x] Does NOT replace existing sync backend
+- [x] Acts as neutral front-end for current sync subsystem
+
+### image sync Menu
+- [x] Interactive OS selection (all, ubuntu, debian, rocky, almalinux)
+- [x] Sync all enabled OS and supported versions
+- [x] No real download (dry-run only)
+- [x] Shows summary per OS/version: new, unchanged, failed, stale, ready
+- [x] Can be called non-interactively: `image sync ubuntu`
+
+### image pull Menu
+- [x] Shows message if no plans available
+- [x] Interactive OS selection from existing plans only
+- [x] Can select version within OS from existing plans only
+- [x] Shows confirmation summary before execution
+- [x] Executes plan-driven downloads
+- [x] Can be called non-interactively: `image pull ubuntu`
+
+### image status Menu
+- [x] Shows table with OS, Version, Status, Cache, Plan ID
+- [x] Status values: not planned, planned, ready, stale, failed
+- [x] Read-only operation
+- [x] Shows totals at bottom
+
+### image setting Menu
+- [x] Main menu: Show Status, Setting OS
+- [x] Show Status displays all OS config in table
+- [x] Setting OS allows interactive configuration
+- [x] Pressing Enter keeps current value
+- [x] Config saved to `config/os/<os>.json`
+- [x] Configurable: min_version, max_version, selection_policy, default_arch, enabled
+
+### image clean Menu
+- [x] Interactive OS selection (all, ubuntu, debian, rocky, almalinux)
+- [x] clean all: requires typing 'YES' for confirmation
+- [x] clean <os>: can choose all versions or select version
+- [x] Shows what will be removed before confirmation
+- [x] Removes plans, cache, and downloaded images for selected scope
+- [x] After clean, status reflects removal correctly
+
+### Menu Tests
+- [x] Menu existence tests (all 5 menus accessible)
+- [x] Sync all creates plans for all OS
+- [x] Sync single OS creates plans only for that OS
+- [x] Pull with no plans shows safe message
+- [x] Pull from plans executes downloads
+- [x] Status shows correct information after sync
+- [x] Setting shows current config table
+- [x] Setting OS change persists
+- [x] Enter keeps existing value in settings
+- [x] Clean all requires YES confirmation
+- [x] Clean OS removes only that OS
+- [x] Clean version removes only that version
+
+### Logic Flow Tests
+- [x] setting -> sync -> status
+- [x] sync -> pull -> status
+- [x] sync -> clean -> status
+- [x] sync (no new) -> status shows unchanged
+- [x] pull without plans -> safe no-selection behavior
+- [x] clean selected version -> only that target removed
+
+### Integration with Sync Backend
+- [x] Menu imports and uses existing sync_image.py functions
+- [x] load_config() reused from sync backend
+- [x] build_plan() reused for sync command
+- [x] execute_from_plan() reused for pull command
+- [x] canonical_os/version/arch reused for validation
+
+---
+
 ## Files Changed
 
-### New Files
+### New Files (Central Image Menu)
+- `tools/image/image_cli.py` - Central CLI entry point with sync, pull, status, setting, clean commands
+- `image` - Shell wrapper script for convenient execution
+
+### New Files (Config)
 - `config/os/ubuntu.json` - Ubuntu-specific config
 - `config/os/debian.json` - Debian-specific config
 - `config/os/rocky.json` - Rocky Linux config
@@ -219,8 +299,8 @@
   - Version selection metadata
   - Enhanced checksum parser
   - Improved candidate selection
-- `docs/current-plan.md` - Updated with new features
-- `docs/checklist-current-plan.md` - Updated with test results
+- `docs/current-plan.md` - Updated with central image menu documentation
+- `docs/checklist-current-plan.md` - Updated with test results and menu tests
 
 ---
 
