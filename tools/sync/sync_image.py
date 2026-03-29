@@ -108,42 +108,138 @@ def canonical_os(config: dict, os_name: str) -> str:
     return value
 
 
-def canonical_version(config: dict, os_name: str, version: str) -> str:
+def _compare_versions(version1: str, version2: str) -> int:
+    """Compare two versions. Returns -1 if v1 < v2, 0 if equal, 1 if v1 > v2"""
+    try:
+        if "." in str(version1) or "." in str(version2):
+            # Ubuntu-style float comparison
+            v1 = float(version1)
+            v2 = float(version2)
+        else:
+            # Debian-style integer comparison
+            v1 = int(version1)
+            v2 = int(version2)
+        if v1 < v2:
+            return -1
+        elif v1 > v2:
+            return 1
+        return 0
+    except ValueError:
+        # Fall back to string comparison
+        if str(version1) < str(version2):
+            return -1
+        elif str(version1) > str(version2):
+            return 1
+        return 0
+
+
+def _check_version_bounds(version: str, min_version: str, max_version: str | None, os_name: str) -> None:
+    """Check if version is within bounds (min_version <= version <= max_version if max_version exists)"""
+    # Check min_version
+    if _compare_versions(version, min_version) < 0:
+        raise ValueError(f"version {version} is below minimum supported version {min_version} for {os_name}")
+    
+    # Check max_version if present
+    if max_version is not None and _compare_versions(version, max_version) > 0:
+        raise ValueError(f"version {version} is above maximum supported version {max_version} for {os_name}")
+
+
+def _discover_debian_versions(cfg: dict) -> tuple[str, str, list]:
+    """Discover available Debian versions from upstream and select the latest valid one.
+    Returns: (selected_version, selection_reason, discovery_log)"""
+    os_cfg = cfg["os_configs"]["debian"]
+    min_version = os_cfg.get("min_version")
+    max_version = os_cfg.get("max_version")
+    
+    # Get all available sources
+    sources = os_cfg.get("sources", {})
+    aliases = os_cfg.get("aliases", {})
+    
+    discovery_log = []
+    candidates = []
+    
+    # Build list of available versions
+    for version, source in sources.items():
+        try:
+            _check_version_bounds(version, min_version, max_version, "debian")
+            candidates.append({
+                "version": version,
+                "release_name": source.get("release_name", ""),
+                "source": source
+            })
+            discovery_log.append({
+                "version": version,
+                "release_name": source.get("release_name", ""),
+                "status": "valid"
+            })
+        except ValueError as e:
+            discovery_log.append({
+                "version": version,
+                "release_name": source.get("release_name", ""),
+                "status": "rejected",
+                "reason": str(e)
+            })
+    
+    if not candidates:
+        raise ValueError(f"no valid Debian version found between {min_version} and {max_version or 'unlimited'}")
+    
+    # Sort by version and pick the latest
+    candidates.sort(key=lambda x: float(x["version"]) if "." in x["version"] else int(x["version"]), reverse=True)
+    selected = candidates[0]
+    
+    selection_reason = f"latest valid version >= {min_version}"
+    if max_version:
+        selection_reason += f" and <= {max_version}"
+    
+    return selected["version"], selection_reason, discovery_log
+
+
+def canonical_version(config: dict, os_name: str, version: str) -> tuple[str, dict]:
+    """Resolve version to canonical form with auto/latest support.
+    Returns: (canonical_version, version_metadata)"""
     value = version.strip().lower()
     os_cfg = config["os_configs"][os_name]
     aliases = os_cfg.get("aliases", {})
+    min_version = os_cfg.get("min_version")
+    max_version = os_cfg.get("max_version")  # Now optional (can be None)
+    selection_policy = os_cfg.get("selection_policy", "explicit")
+    
+    metadata = {
+        "requested_version": version,
+        "selection_mode": "explicit",
+        "discovery_log": None,
+        "selection_reason": None
+    }
+    
+    # Handle auto/latest selection for Debian
+    if value in ("auto", "latest"):
+        if os_name != "debian":
+            raise ValueError(f"version '{version}' is only supported for Debian (os: {os_name})")
+        if selection_policy not in ("latest", "auto"):
+            raise ValueError(f"version '{version}' is not supported for {os_name} (selection_policy: {selection_policy})")
+        
+        metadata["selection_mode"] = value
+        selected_version, selection_reason, discovery_log = _discover_debian_versions(config)
+        metadata["discovery_log"] = discovery_log
+        metadata["selection_reason"] = selection_reason
+        
+        return selected_version, metadata
     
     # Resolve alias to canonical version
     canonical = None
     if value in aliases:
         canonical = aliases[value]
+        metadata["resolved_from_alias"] = value
     elif value in os_cfg.get("sources", {}):
         canonical = value
     else:
         raise ValueError(f"unsupported version for {os_name}: {version}")
     
-    # Check min_version guard
-    min_version = os_cfg.get("min_version")
+    # Check version bounds
     if min_version:
-        # For Ubuntu: compare as floats (20.04 < 22.04)
-        # For Debian: compare as integers (11 < 12)
-        try:
-            if "." in str(min_version):
-                # Ubuntu-style version comparison
-                if float(canonical) < float(min_version):
-                    raise ValueError(f"version {version} ({canonical}) is below minimum supported version {min_version} for {os_name}")
-            else:
-                # Debian-style version comparison
-                if int(canonical) < int(min_version):
-                    raise ValueError(f"version {version} ({canonical}) is below minimum supported version {min_version} for {os_name}")
-        except ValueError as e:
-            if "below minimum" in str(e):
-                raise
-            # If conversion fails, fall back to string comparison
-            if str(canonical) < str(min_version):
-                raise ValueError(f"version {version} ({canonical}) is below minimum supported version {min_version} for {os_name}")
+        _check_version_bounds(canonical, min_version, max_version, os_name)
     
-    return canonical
+    return canonical, metadata
 
 
 def canonical_arch(config: dict, os_name: str, arch: str) -> str:
@@ -241,7 +337,7 @@ def build_paths(cfg: dict, os_name: str, release_name: str, arch: str, artifact_
     }
 
 
-def build_plan(cfg: dict, os_name: str, version: str, arch: str) -> dict:
+def build_plan(cfg: dict, os_name: str, version: str, arch: str, version_metadata: dict) -> dict:
     src = cfg["os_configs"][os_name]["sources"][version]
     listing_url = src["listing_url"]
     listing_html = http_get_text(listing_url, cfg)
@@ -340,6 +436,10 @@ def build_plan(cfg: dict, os_name: str, version: str, arch: str) -> dict:
         }
     }
 
+    # Add version selection metadata if available
+    if version_metadata:
+        plan["version_selection"] = version_metadata
+
     manifest = {
         "plan_id": plan_id,
         "summary": {
@@ -352,6 +452,14 @@ def build_plan(cfg: dict, os_name: str, version: str, arch: str) -> dict:
             "expected_checksum": checksum_value
         }
     }
+    
+    # Add selection info to manifest if available
+    if version_metadata:
+        manifest["summary"]["selection_mode"] = version_metadata.get("selection_mode", "explicit")
+        if version_metadata.get("selection_reason"):
+            manifest["summary"]["selection_reason"] = version_metadata["selection_reason"]
+        if version_metadata.get("discovery_log"):
+            manifest["summary"]["discovered_candidates"] = len(version_metadata["discovery_log"])
 
     write_json(paths["plan_file"], plan)
     write_json(paths["manifest_file"], manifest)
@@ -619,14 +727,14 @@ def main() -> int:
 
     try:
         os_name = canonical_os(cfg, args.os)
-        version = canonical_version(cfg, os_name, args.version)
+        version, version_metadata = canonical_version(cfg, os_name, args.version)
         arch = canonical_arch(cfg, os_name, args.arch)
     except ValueError as e:
         print(f"[ERROR] {e}", file=sys.stderr)
         print(f"Supported OS: {', '.join(cfg.get('os_configs', {}).keys())}", file=sys.stderr)
         return 1
 
-    plan = build_plan(cfg, os_name, version, arch)
+    plan = build_plan(cfg, os_name, version, arch, version_metadata)
     print("[DRY-RUN OK]")
     print(json.dumps(plan, indent=2, ensure_ascii=False))
     return 0
