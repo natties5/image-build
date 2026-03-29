@@ -9,6 +9,7 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.cpython-*.pyc
 
 # Temp / partial
 *.tmp
@@ -55,6 +56,7 @@ cache/
 
 # Cache (new image domain location)
 image/runtime/cache/
+image/runtime/cache/**
 
 # Local credentials / environment
 id_jump
