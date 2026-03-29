@@ -1,6 +1,9 @@
 {
   "os": "ubuntu",
   "min_version": "20.04",
+  "max_version": null,
+  "selection_policy": "explicit",
+  "release_channel": "lts",
   "aliases": {
     "jammy": "22.04",
     "noble": "24.04",

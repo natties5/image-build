@@ -1,6 +1,9 @@
 {
   "os": "debian",
   "min_version": "12",
+  "max_version": null,
+  "selection_policy": "latest",
+  "release_channel": "stable",
   "aliases": {
     "bookworm": "12",
     "trixie": "13"
