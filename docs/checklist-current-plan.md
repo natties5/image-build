@@ -1,19 +1,20 @@
-# Sync Checklist (Phase 0–6)
+# Sync Checklist (Phase 0–6) - Post Dynamic Discovery
 
-สถานะที่ใช้:
-- `[ ]` ยังไม่ผ่าน / ยังไม่ทำ
-- `[x]` ผ่าน
-- `[~]` มีบางส่วนแล้ว
-- `[-]` ไม่เกี่ยวข้องกับรอบนี้
+Status indicators:
+- `[ ]` Not passed / Not done
+- `[x]` Passed
+- `[~]` Partially done
+- `[-]` Not applicable to this round
 
 ---
 
 ## Config Structure (Refactored)
 - [x] `config/sync-config.json` contains only global/shared settings
-- [x] `config/os/ubuntu.json` created with min_version, max_version (optional), selection_policy, aliases, architectures, sources
-- [x] `config/os/debian.json` created with min_version, max_version (optional), selection_policy, aliases, architectures, sources
-- [x] `config/os/rocky.json` created with min_version, architectures, sources
-- [x] `config/os/almalinux.json` created with min_version, architectures, sources
+- [x] `config/os/ubuntu.json` created with min_version, max_version (optional), selection_policy, aliases, architectures, sources, discovery
+- [x] `config/os/debian.json` created with min_version, max_version (optional), selection_policy, aliases, architectures, sources, discovery
+- [x] `config/os/rocky.json` created with min_version, architectures, sources, discovery
+- [x] `config/os/almalinux.json` created with min_version, architectures, sources, discovery
+- [x] `config/os/fedora.json` created with enabled=false, discovery configuration
 - [x] Loader reads and merges split configs correctly
 - [x] Backward compatibility preserved for CLI interface
 
@@ -24,88 +25,155 @@
 - [x] **max_version**: Optional field (null or omitted), enforced only if present
 - [x] **selection_policy**: Support "explicit" and "latest" modes
 - [x] **release_channel**: Documented field for release classification
+- [x] **enabled**: Boolean flag to enable/disable OS
 - [x] Version bounds checking with proper error messages
 
 ---
 
 ## Phase 0: Input intake and normalization
-- [x] มี input หลัก os / version / arch
-- [x] normalize os ได้
-- [x] normalize version alias ได้
-- [x] normalize architecture ได้
-- [x] validate input edge cases (unsupported os/version/arch)
-- [x] reject invalid combinations ครบทุกกรณี
-- [x] support "auto" and "latest" as version selectors (Debian)
+- [x] Has main inputs os / version / arch
+- [x] Can normalize os
+- [x] Can normalize version alias
+- [x] Can normalize architecture
+- [x] Validates input edge cases (unsupported os/version/arch)
+- [x] Rejects invalid combinations for all cases
+- [x] Supports "auto" and "latest" as version selectors (Debian, Fedora when enabled)
 
 ---
 
 ## Phase 1: Policy loading and source mapping
-- [x] โหลด `config/sync-config.json` ได้ (global settings)
-- [x] โหลด `config/os/*.json` ได้ (per-OS settings)
-- [x] merge configs เข้า runtime structure ได้
-- [x] map OS/version ไป source policy ได้
-- [x] map alias ไป canonical version ได้
-- [x] มี host allowlist
-- [x] coverage Ubuntu 20.04, 22.04, 24.04
-- [x] coverage Debian 12, 13
-- [x] coverage Rocky Linux 8, 9
-- [x] coverage AlmaLinux 8, 9
+- [x] Loads `config/sync-config.json` (global settings)
+- [x] Loads `config/os/*.json` (per-OS settings)
+- [x] Merges configs into runtime structure
+- [x] Maps OS/version to source policy
+- [x] Maps alias to canonical version
+- [x] Has host allowlist
+- [x] Coverage Ubuntu 20.04, 22.04, 24.04
+- [x] Coverage Debian 12, 13
+- [x] Coverage Rocky Linux 8, 9, 10
+- [x] Coverage AlmaLinux 8, 9, 10
+- [x] Coverage Fedora 39-43 (discovery only, downloads disabled)
 
 ---
 
-## Phase 2: Source discovery
-- [x] มี source listing URL ใน policy
-- [x] fetch official listing จริง
-- [x] parse candidate จริง
-- [x] filter candidate จริง
-- [x] select candidate แบบ strict จริง
-- [x] filter out checksum/metadata files (.CHECKSUM, .asc, .sig)
+## Phase 2: Source Discovery (Dynamic)
+- [x] Has source listing URL in policy
+- [x] **DYNAMIC DISCOVERY**: Fetches official listing from upstream
+- [x] **DYNAMIC DISCOVERY**: Parses candidates from HTML directory listings
+- [x] **DYNAMIC DISCOVERY**: Filters candidates by policy
+- [x] **DYNAMIC DISCOVERY**: Selects candidates with strict policy compliance
+- [x] Filters out checksum/metadata files (.CHECKSUM, .asc, .sig)
+- [x] **DYNAMIC DISCOVERY**: Ubuntu discovery from cloud-images.ubuntu.com
+- [x] **DYNAMIC DISCOVERY**: Debian discovery from cloud.debian.org
+- [x] **DYNAMIC DISCOVERY**: Rocky Linux discovery from download.rockylinux.org
+- [x] **DYNAMIC DISCOVERY**: AlmaLinux discovery from repo.almalinux.org
+- [x] **DYNAMIC DISCOVERY**: Fedora discovery from dl.fedoraproject.org
 
 ---
 
 ## Phase 3: Version guard and checksum planning
-- [x] มี selected filename จาก official listing
-- [x] parse checksum file จริง
-- [x] freeze expected checksum ลง plan
-- [x] reject ambiguity จริง
-- [x] **min_version guard**: reject versions below minimum early
-- [x] **max_version guard**: reject versions above maximum (if set)
+- [x] Has selected filename from official listing
+- [x] Parses checksum file
+- [x] Freezes expected checksum into plan
+- [x] Rejects ambiguity
+- [x] **min_version guard**: rejects versions below minimum early
+- [x] **max_version guard**: rejects versions above maximum (if set)
 - [x] **min_version/max_version guard**: works with aliases
-- [x] **checksum parser**: support Ubuntu/Debian format (hash filename)
-- [x] **checksum parser**: support Rocky/AlmaLinux format (SHA256 (filename) = hash)
-- [ ] cross-check version กับ upstream metadata อื่นนอกจาก filename/checksum
+- [x] **checksum parser**: supports Ubuntu/Debian format (hash filename)
+- [x] **checksum parser**: supports Rocky/AlmaLinux format (SHA256 (filename) = hash)
+- [ ] Cross-check version with upstream metadata beyond filename/checksum
 
 ---
 
 ## Phase 4: Dry-run plan and state persistence
-- [x] สร้าง `plan.json` ได้
-- [x] สร้าง `manifest.json` ได้
-- [x] มี `plan_id`
-- [x] persist state ลง `state/sync/plans/<plan_id>/`
-- [x] dry-run ยังไม่ download จริง
+- [x] Creates `plan.json`
+- [x] Creates `manifest.json`
+- [x] Has `plan_id`
+- [x] Persists state to `state/sync/plans/<plan_id>/`
+- [x] Dry-run does not download
 - [x] **version_selection metadata** in plan (for auto/latest mode)
+- [x] **upstream_discovery metadata** in plan
+- [x] **policy_filter metadata** in plan
+- [x] **artifact_metadata** in plan (disk_format, preference_score)
 
 ---
 
 ## Phase 5: Cache decision
-- [x] มี cache identity จาก source/version/arch/checksum
-- [x] detect HIT / MISS / INVALID แบบเบื้องต้น
-- [x] bind cache กับ checksum/source/version/arch
-- [x] stale cache detection (checksum_changed, source_url_changed, filename_changed)
+- [x] Has cache identity from source/version/arch/checksum
+- [x] Detects HIT / MISS / INVALID
+- [x] Binds cache to checksum/source/version/arch
+- [x] Stale cache detection (checksum_changed, source_url_changed, filename_changed)
 - [x] STALE state in dry-run and execute
 
 ---
 
 ## Phase 6: Controlled download
-- [x] block download ถ้ายังไม่มี dry-run ด้วย `--plan-id`
-- [x] download จาก `plan.json` เท่านั้น
-- [x] verify checksum หลังโหลด
-- [x] write run.json
-- [x] write logs.jsonl
-- [x] download progress MB/s และ ETA
-- [x] cleanup `.partial` เมื่อ fail/cancel
-- [x] retry policy (3 attempts with exponential backoff)
-- [x] timeout handling improvements (URLError, HTTPError, TimeoutError)
+- [x] Blocks download if no dry-run with `--plan-id`
+- [x] Downloads from `plan.json` only
+- [x] Verifies checksum after download
+- [x] Writes run.json
+- [x] Writes logs.jsonl
+- [x] Download progress MB/s and ETA
+- [x] Cleanup `.partial` on fail/cancel
+- [x] Retry policy (3 attempts with exponential backoff)
+- [x] Timeout handling improvements (URLError, HTTPError, TimeoutError)
+
+---
+
+## Dynamic Discovery Tests
+
+### Ubuntu Discovery
+- [x] Discovers versions from cloud-images.ubuntu.com
+- [x] Parses release directories (focal, jammy, noble)
+- [x] Maps release names to versions correctly
+- [x] Creates discovery_log with evidence
+
+### Debian Discovery
+- [x] Discovers versions from cloud.debian.org/images/cloud/
+- [x] Parses release directories (bookworm, trixie)
+- [x] Maps release names to versions correctly
+- [x] Creates discovery_log with evidence
+- [x] Filters unstable releases when configured
+
+### Rocky Linux Discovery
+- [x] Discovers versions from download.rockylinux.org/pub/rocky/
+- [x] Parses version directories (8, 9, 10)
+- [x] Creates discovery_log with evidence
+- [x] Detects version 10 when available upstream
+
+### AlmaLinux Discovery
+- [x] Discovers versions from repo.almalinux.org/almalinux/
+- [x] Parses version directories (8, 9, 10)
+- [x] Creates discovery_log with evidence
+- [x] Detects version 10 when available upstream
+- [x] Excludes beta/testing directories
+
+### Fedora Discovery
+- [x] Discovers versions from dl.fedoraproject.org
+- [x] Parses version directories (39-43)
+- [x] Creates discovery_log with evidence
+- [x] Respects min_discovery_version setting
+
+---
+
+## Artifact Preference Tests
+
+### qcow2 Preference
+- [x] Prefers qcow2 when both qcow2 and img available
+- [x] Assigns higher preference_score to qcow2
+- [x] Records disk_format correctly
+
+### img Support
+- [x] Accepts img format when qcow2 not available
+- [x] Records disk_format as "raw" for img files
+- [x] Assigns appropriate preference_score
+
+### Metadata Tracking
+- [x] Records artifact_extension in metadata
+- [x] Records source_filename in metadata
+- [x] Records artifact_type in metadata
+- [x] Records preference_score in metadata
+- [x] Records image_variant (cloud/generic) when detected
 
 ---
 
@@ -113,9 +181,10 @@
 
 ### Config Structure Tests
 - [x] Global config loads successfully
-- [x] Per-OS configs (ubuntu, debian, rocky, almalinux) load successfully
+- [x] Per-OS configs (ubuntu, debian, rocky, almalinux, fedora) load successfully
 - [x] Split config merge works in runtime
 - [x] No breaking changes to existing functionality
+- [x] Discovery configuration present in all OS configs
 
 ### Version Policy Tests
 - [x] min_version enforcement works
@@ -123,6 +192,7 @@
 - [x] max_version optional (works when null or omitted)
 - [x] selection_policy "explicit" works
 - [x] selection_policy "latest" works
+- [x] enabled flag respected
 
 ### Ubuntu Tests (Explicit Mode)
 - [x] ubuntu 20.04 amd64 dry-run
@@ -131,12 +201,14 @@
 - [x] ubuntu focal alias dry-run
 - [x] ubuntu jammy alias dry-run
 - [x] ubuntu noble alias dry-run
+- [x] **Discovery**: Detects versions from upstream
 
 ### Debian Tests (Explicit Mode)
 - [x] debian 12 amd64 dry-run
 - [x] debian 13 amd64 dry-run
 - [x] debian bookworm alias dry-run
 - [x] debian trixie alias dry-run
+- [x] **Discovery**: Detects versions from upstream
 
 ### Debian Tests (Auto/Latest Mode)
 - [x] debian auto amd64 dry-run - selects latest valid version
@@ -144,16 +216,31 @@
 - [x] version_selection metadata present in plan
 - [x] discovery_log shows valid candidates
 - [x] selection_reason explains the choice
+- [x] upstream_discovery metadata present
 
 ### Rocky Linux Tests
 - [x] rocky 8 amd64 dry-run
 - [x] rocky 9 amd64 dry-run
+- [x] rocky 10 amd64 dry-run
 - [x] rocky 7 amd64 rejected (below min_version)
+- [x] **Discovery**: Detects versions from upstream
+- [x] **Discovery**: Detects version 10 when available
 
 ### AlmaLinux Tests
 - [x] almalinux 8 amd64 dry-run
 - [x] almalinux 9 amd64 dry-run
+- [x] almalinux 10 amd64 dry-run
 - [x] almalinux 7 amd64 rejected (below min_version)
+- [x] **Discovery**: Detects versions from upstream
+- [x] **Discovery**: Detects version 10 when available
+- [x] **Discovery**: Excludes beta/testing directories
+
+### Fedora Tests (Discovery Only)
+- [x] Fedora discovery works via dl.fedoraproject.org
+- [x] Detects versions 39-43
+- [x] Respects min_discovery_version setting
+- [x] **Disabled**: Downloads disabled pending path verification
+- [x] **Documentation**: Clear disclaimer in config
 
 ### Version Bounds Tests
 - [x] **Reject**: ubuntu 18.04 amd64 (below min_version 20.04)
@@ -180,7 +267,7 @@
 - [x] unsupported arch (ppc64le)
 - [x] missing plan-id
 - [x] bad plan-id
-- [x] candidate ambiguity (3/3 unit tests passed)
+- [x] candidate ambiguity (resolved via deduplication)
 
 ### Checksum Tests
 - [x] checksum mismatch detection (fixture test)
@@ -195,6 +282,7 @@
 - [x] max_version rejection message is clear (if set)
 - [x] hint to run dry-run first on plan not found
 - [x] stale cache info messages
+- [x] discovery failure messages
 
 ### Test Infrastructure
 - [x] ambiguity test harness (tools/sync/fixtures/test_ambiguity.py)
@@ -211,11 +299,12 @@
 - [x] Acts as neutral front-end for current sync subsystem
 
 ### image sync Menu
-- [x] Interactive OS selection (all, ubuntu, debian, rocky, almalinux)
+- [x] Interactive OS selection (all, ubuntu, debian, rocky, almalinux, fedora)
 - [x] Sync all enabled OS and supported versions
 - [x] No real download (dry-run only)
 - [x] Shows summary per OS/version: new, unchanged, failed, stale, ready
 - [x] Can be called non-interactively: `image sync ubuntu`
+- [x] **NEW**: Shows discovery results from upstream
 
 ### image pull Menu
 - [x] Shows message if no plans available
@@ -230,6 +319,7 @@
 - [x] Status values: not planned, planned, ready, stale, failed
 - [x] Read-only operation
 - [x] Shows totals at bottom
+- [x] **NEW**: Shows enabled/disabled status
 
 ### image setting Menu
 - [x] Main menu: Show Status, Setting OS
@@ -240,7 +330,7 @@
 - [x] Configurable: min_version, max_version, selection_policy, default_arch, enabled
 
 ### image clean Menu
-- [x] Interactive OS selection (all, ubuntu, debian, rocky, almalinux)
+- [x] Interactive OS selection (all, ubuntu, debian, rocky, almalinux, fedora)
 - [x] clean all: requires typing 'YES' for confirmation
 - [x] clean <os>: can choose all versions or select version
 - [x] Shows what will be removed before confirmation
@@ -268,6 +358,7 @@
 - [x] sync (no new) -> status shows unchanged
 - [x] pull without plans -> safe no-selection behavior
 - [x] clean selected version -> only that target removed
+- [x] **NEW**: discovery -> sync -> status shows new versions
 
 ### Integration with Sync Backend
 - [x] Menu imports and uses existing sync_image.py functions
@@ -275,6 +366,7 @@
 - [x] build_plan() reused for sync command
 - [x] execute_from_plan() reused for pull command
 - [x] canonical_os/version/arch reused for validation
+- [x] **NEW**: discover_upstream_versions() used for dynamic discovery
 
 ---
 
@@ -282,34 +374,70 @@
 
 ### New Files (Central Image Menu)
 - `tools/image/image_cli.py` - Central CLI entry point with sync, pull, status, setting, clean commands
-- `image` - Shell wrapper script for convenient execution
 
 ### New Files (Config)
-- `config/os/ubuntu.json` - Ubuntu-specific config
-- `config/os/debian.json` - Debian-specific config
-- `config/os/rocky.json` - Rocky Linux config
-- `config/os/almalinux.json` - AlmaLinux config
+- `config/os/ubuntu.json` - Ubuntu-specific config with discovery
+- `config/os/debian.json` - Debian-specific config with discovery
+- `config/os/rocky.json` - Rocky Linux config with discovery (versions 8, 9, 10)
+- `config/os/almalinux.json` - AlmaLinux config with discovery (versions 8, 9, 10)
+- `config/os/fedora.json` - Fedora config with discovery (disabled by default)
 
 ### Modified Files
 - `config/sync-config.json` - Simplified to global settings only
-- `tools/sync/sync_image.py` - Major updates:
-  - Optional max_version support
-  - selection_policy support
-  - Debian auto/latest discovery
-  - Version selection metadata
-  - Enhanced checksum parser
-  - Improved candidate selection
-- `docs/current-plan.md` - Updated with central image menu documentation
-- `docs/checklist-current-plan.md` - Updated with test results and menu tests
+- `tools/sync/sync_image.py` - Major enhancements:
+  - Dynamic upstream version discovery functions
+  - Artifact preference selection
+  - Comprehensive metadata tracking
+  - Discovery evidence logging
+  - Duplicate candidate deduplication
+- `docs/current-plan.md` - Updated with dynamic discovery and artifact preference
+- `docs/checklist-current-plan.md` - Updated with new test results
 
 ---
 
 ## Known Limitations & Future Work
-- **Fedora**: Official download site has Anubis bot protection preventing automated access
-  - Workaround: Use alternative mirrors or manual download
-  - Status: Config structure prepared but not enabled due to bot protection
-- **Auto/Latest Mode**: Currently only implemented for Debian
-  - Ubuntu, Rocky, AlmaLinux remain explicit-only
-  - Can be extended in future rounds
-- cross-check with extra upstream metadata
-- full integration tests with complete downlo
+
+### Fedora Status
+- **Discovery**: Working correctly via dl.fedoraproject.org
+- **Download paths**: Require verification before enabling
+- **Current status**: Disabled by default with clear documentation
+- **Workaround**: Enable after validating image URLs and checksum locations
+- **Evidence**: Discovery metadata shows versions 39-43 correctly detected
+
+### Auto/Latest Mode
+- **Debian**: Fully supported
+- **Fedora**: Supported in config (when enabled)
+- **Ubuntu**: Explicit mode only (intentional for LTS stability)
+- **Rocky/AlmaLinux**: Explicit mode only (intentional for enterprise stability)
+- **Future**: Can be extended to other OS families if desired
+
+### Remaining Gaps
+- Cross-check with extra upstream metadata beyond directory listings
+- Full integration tests with complete downloads (Smoke Pass sufficient for most cases)
+- Fedora enablement (requires path verification)
+- GUI/web interface for easier management
+- Automated periodic sync scheduling
+
+---
+
+## Summary
+
+### What Works
+- Dynamic upstream version discovery for all OS families
+- Policy-driven version filtering (min/max bounds)
+- Artifact preference (qcow2 > img > others)
+- Comprehensive metadata tracking
+- Full discovery evidence logging
+- Ubuntu 20.04/22.04/24.04 with upstream detection
+- Debian 12/13 with explicit + auto/latest modes
+- Rocky Linux 8/9/10 with upstream detection
+- AlmaLinux 8/9/10 with upstream detection (stable only)
+- Fedora discovery working (downloads disabled pending verification)
+
+### What's New
+- **Dynamic Discovery**: Automatically detects new versions from upstream
+- **Artifact Preference**: Intelligently selects best format
+- **Metadata Tracking**: Records disk_format, artifact_type, preference_score
+- **Evidence Logging**: Full audit trail of discovery and selection
+- **Version 10 Support**: Rocky and AlmaLinux now include version 10
+- **Fedora Foundation**: Discovery implemented, ready for enablement

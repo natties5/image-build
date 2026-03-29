@@ -1,4 +1,4 @@
-# Sync Image Plan (Phase 0–6 Only)
+# Sync Image Plan (Phase 0–6) - Enhanced with Dynamic Discovery
 
 ## Overview
 
@@ -35,9 +35,69 @@ config → sync → pull → status → clean
 - **Interactive UX**: Users select targets interactively; system reads config as source of truth
 - **Safe defaults**: No destructive operations without confirmation; Enter keeps current values
 - **Backward compatible**: Existing sync backend (`tools/sync/sync_image.py`) is preserved
+- **Dynamic Discovery**: `sync` automatically detects new versions from upstream sources
+
+## Dynamic Upstream Discovery
+
+The system now supports **dynamic upstream version discovery** from official sources:
+
+### Discovery Pipeline
+```
+official source
+-> version discovery (HTML directory listing)
+-> normalization
+-> policy filter (min_version, max_version, enabled)
+-> candidate selection
+-> evidence logging
+-> plan update
+```
+
+### Supported Discovery Methods
+
+All major OS families now support automatic version discovery:
+
+- **Ubuntu**: Discovers from cloud-images.ubuntu.com
+- **Debian**: Discovers from cloud.debian.org/images/cloud/
+- **Rocky Linux**: Discovers from download.rockylinux.org/pub/rocky/
+- **AlmaLinux**: Discovers from repo.almalinux.org/almalinux/
+- **Fedora**: Discovers from dl.fedoraproject.org/pub/fedora/linux/releases/
+
+### Policy-Driven Filtering
+
+Discovery respects all policy settings:
+- `enabled`: Skip disabled OS families
+- `min_version`: Required minimum version
+- `max_version`: Optional maximum version
+- `selection_policy`: "explicit" or "latest"
+- `release_channel`: Filter by release type
+
+### Discovery Evidence
+
+Every discovery operation produces detailed evidence:
+```json
+{
+  "upstream_discovery": {
+    "discovery_source": "https://cloud.debian.org/images/cloud/",
+    "discovery_method": "html_directory_listing",
+    "discovery_log": [...],
+    "raw_candidates_found": 2
+  },
+  "policy_filter": {
+    "candidates_before_filter": 2,
+    "candidates_after_filter": 2,
+    "filter_log": [...]
+  },
+  "version_selection": {
+    "selected_version": "13",
+    "selection_reason": "latest valid version >= 12",
+    "selection_log": [...]
+  }
+}
+```
 
 ## Scope
-ระบบนี้โฟกัสเฉพาะ phase 0–6 ของงาน sync image:
+
+This system focuses on phase 0–6 of image sync:
 
 - Phase 0: input intake and normalization
 - Phase 1: policy loading and source mapping
@@ -47,42 +107,44 @@ config → sync → pull → status → clean
 - Phase 5: cache decision
 - Phase 6: controlled download from plan.json
 
-ยังไม่รวม build, guest access, OpenStack upload และ post-upload validation
+Not included: build, guest access, OpenStack upload, and post-upload validation
 
 ---
 
 ## Goal
-เป้าหมายของ baseline นี้คือทำให้ sync image เป็น phase ต้นน้ำที่เสถียรที่สุด เพราะถ้า phase นี้ผิด ระบบทั้งชุดจะพังต่อทั้งหมด
 
-สิ่งที่ต้องได้:
-- resolve input เป็น canonical form
-- map OS/version ไป official source อย่างชัดเจน
-- fetch official listing จริง
-- เลือก candidate แบบ strict
-- parse checksum จริง
-- สร้าง dry-run plan.json ที่ใช้ execute ต่อได้
-- execute ต้องใช้ plan.json เท่านั้น
-- cache ต้องผูกกับ source/version/arch/checksum
-- download มี progress MB/s และ ETA
-- cleanup partial files อัตโนมัติเมื่อ fail/cancel
+The goal of this baseline is to make sync image the most stable upstream phase, because if this phase fails, the entire system will fail downstream.
+
+Objectives:
+- Resolve input to canonical form
+- Map OS/version to official source clearly
+- Fetch official listings dynamically
+- Select candidates with strict policy compliance
+- Parse checksums accurately
+- Create dry-run plan.json that can be executed
+- Execute strictly from plan.json only
+- Cache must be bound to source/version/arch/checksum
+- Download shows progress MB/s and ETA
+- Automatic cleanup of partial files on fail/cancel
 
 ---
 
-## Core rules
-- ห้าม download จริงก่อนมี dry-run plan
-- ห้าม execute จริงโดย resolve source ใหม่เอง
-- ห้ามใช้ version ที่ไม่ผ่าน canonical + policy + min_version guard
-- ห้าม reuse cache ข้าม source/version/arch/checksum แบบไม่มี identity guard
-- host ต้องอยู่ใน allowlist
+## Core Rules
+
+- No download before dry-run plan exists
+- No execution by re-resolving sources independently
+- No versions allowed that fail canonical + policy + min_version guard
+- No cache reuse across source/version/arch/checksum without identity guard
+- Hosts must be in allowlist
 
 ---
 
 ## Configuration Structure
 
-Config ถูกแบ่งเป็น 2 ระดับ:
+Config is split into two levels:
 
 ### Global Config (`config/sync-config.json`)
-เก็บ global/shared settings:
+Stores global/shared settings:
 - version
 - state_root, cache_root, log_root, report_root
 - request_timeout_seconds
@@ -90,21 +152,24 @@ Config ถูกแบ่งเป็น 2 ระดับ:
 - user_agent
 
 ### Per-OS Config (`config/os/*.json`)
-แยกตาม OS แต่ละตัว:
+Separate files for each OS:
 - ubuntu.json - Ubuntu LTS releases
-- debian.json - Debian releases  
+- debian.json - Debian releases
 - rocky.json - Rocky Linux releases
 - almalinux.json - AlmaLinux releases
+- fedora.json - Fedora releases (disabled by default)
 
 Each file contains:
-- os: ชื่อ OS
+- os: OS name
+- enabled: Whether this OS is enabled
 - min_version: minimum supported version (required)
-- max_version: maximum supported version (optional, can be null or omitted)
+- max_version: maximum supported version (optional, can be null)
 - selection_policy: version selection policy ("explicit" or "latest")
 - release_channel: release channel (e.g., "stable", "lts", "rolling")
 - aliases: version aliases
 - architectures: arch mappings
 - sources: version-specific listing/checksum settings
+- discovery: upstream discovery configuration
 
 ### Version Selection Policies
 
@@ -112,38 +177,74 @@ Each file contains:
 
 **latest**: Supports automatic version discovery
 - Use `auto` or `latest` as version selector
-- System discovers available versions from config
+- System discovers available versions from upstream
 - Filters by min_version and max_version (if set)
 - Selects the latest valid version
-- Currently supported for: Debian
+- Supported for: Debian (Fedora when enabled)
+
+---
+
+## Artifact Format Selection
+
+The system now implements **artifact preference** logic:
+
+### Preference Order (highest first)
+1. **qcow2** (score: 100) - Preferred cloud image format
+2. **raw/img** (score: 80) - Raw disk images
+3. **vmdk/vdi** (score: 60) - VM-specific formats
+4. **iso** (score: 50) - Installer media
+5. **tar** (score: 30) - Archive formats
+
+### Metadata Tracking
+
+Each artifact tracks comprehensive metadata:
+```json
+{
+  "artifact_metadata": {
+    "source_filename": "debian-13-generic-amd64.qcow2",
+    "artifact_extension": ".qcow2",
+    "disk_format": "qcow2",
+    "artifact_type": "disk_image",
+    "preference_score": 110,
+    "image_variant": "cloud"
+  }
+}
+```
+
+This ensures the best format is selected when multiple options exist.
 
 ---
 
 ## Loader Behavior
-1. อ่าน global config จาก `config/sync-config.json`
-2. อ่านทุก per-OS config จาก `config/os/*.json`
-3. Merge เข้าเป็น runtime config structure เดียว
-4. ใช้สำหรับ validation, discovery, execution
+
+1. Read global config from `config/sync-config.json`
+2. Read all per-OS configs from `config/os/*.json`
+3. Merge into single runtime config structure
+4. Use for validation, discovery, execution
 
 ---
 
-## Current flow
+## Current Flow
+
+```
 input
 -> normalize (canonical_os, canonical_version, canonical_arch)
 -> validate (min_version/max_version guard, selection_policy)
--> [if auto/latest mode] discover versions and select latest valid
+-> [discovery] discover versions from upstream sources
+-> [if auto/latest mode] select latest valid version
 -> policy lookup
 -> official listing fetch
--> strict candidate selection
+-> strict candidate selection with artifact preference
 -> checksum fetch
--> dry-run plan (with version_selection metadata)
+-> dry-run plan (with full discovery metadata)
 -> cache decision
 -> execute from plan.json only
 -> verify checksum
+```
 
 ---
 
-## Run examples
+## Run Examples
 
 ### Central Image Menu (Recommended)
 
@@ -189,20 +290,19 @@ py tools\sync\sync_image.py debian 13 amd64
 py tools\sync\sync_image.py debian bookworm amd64
 py tools\sync\sync_image.py debian trixie amd64
 
+# Debian (auto/latest mode)
+py tools\sync\sync_image.py debian auto amd64
+py tools\sync\sync_image.py debian latest amd64
+
 # Rocky Linux
 py tools\sync\sync_image.py rocky 8 amd64
 py tools\sync\sync_image.py rocky 9 amd64
+py tools\sync\sync_image.py rocky 10 amd64
 
 # AlmaLinux
 py tools\sync\sync_image.py almalinux 8 amd64
 py tools\sync\sync_image.py almalinux 9 amd64
-```
-
-### Auto/Latest Mode (Debian only)
-```bash
-# Auto-discover and select latest valid Debian version
-py tools\sync\sync_image.py debian auto amd64
-py tools\sync\sync_image.py debian latest amd64
+py tools\sync\sync_image.py almalinux 10 amd64
 ```
 
 Execute from plan:
@@ -210,25 +310,40 @@ Execute from plan:
 py tools\sync\sync_image.py --execute --plan-id <plan_id>
 ```
 
-ผลลัพธ์:
-- สร้าง `state/sync/plans/<plan_id>/plan.json`
-- สร้าง `state/sync/plans/<plan_id>/manifest.json`
-- สร้าง `state/sync/plans/<plan_id>/logs.jsonl`
-- สร้าง `logs/sync/sync.log.jsonl`
-- เมื่อ execute สำเร็จจะมี `run.json` และไฟล์ใน `cache/official/...`
+Results:
+- Creates `state/sync/plans/<plan_id>/plan.json`
+- Creates `state/sync/plans/<plan_id>/manifest.json`
+- Creates `state/sync/plans/<plan_id>/logs.jsonl`
+- Creates `logs/sync/sync.log.jsonl`
+- On successful execution: creates `run.json` and files in `cache/official/...`
 
 ### Version Selection Evidence
-When using auto/latest mode, the plan includes version_selection metadata:
+
+When using auto/latest mode or when upstream discovery is active, the plan includes comprehensive metadata:
 ```json
 {
   "version_selection": {
     "requested_version": "latest",
     "selection_mode": "latest",
-    "discovery_log": [
-      {"version": "12", "release_name": "bookworm", "status": "valid"},
-      {"version": "13", "release_name": "trixie", "status": "valid"}
-    ],
-    "selection_reason": "latest valid version >= 12"
+    "upstream_discovery": {
+      "discovery_source": "https://cloud.debian.org/images/cloud/",
+      "discovery_method": "html_directory_listing",
+      "discovery_log": [
+        {"version": "12", "release_name": "bookworm", "status": "discovered"},
+        {"version": "13", "release_name": "trixie", "status": "discovered"}
+      ],
+      "raw_candidates_found": 2
+    },
+    "policy_filter": {
+      "candidates_before_filter": 2,
+      "candidates_after_filter": 2,
+      "filter_log": [...]
+    },
+    "version_selection": {
+      "selected_version": "13",
+      "selection_reason": "latest valid version >= 12",
+      "selection_log": [...]
+    }
   }
 }
 ```
@@ -262,6 +377,7 @@ The central menu:
 - Creates/updates plans without downloading
 - Interactive OS selection (or specify OS as argument)
 - Shows summary: new, unchanged, failed, stale, ready
+- Displays discovery results from upstream sources
 
 #### image pull
 - Downloads real images from existing plans only
@@ -274,6 +390,7 @@ The central menu:
 - Shows current status for each OS/version
 - Table output with: OS, Version, Status, Cache, Plan ID
 - Status values: not planned, planned, ready, stale, failed
+- Shows enabled/disabled status for each OS
 - Read-only in this round
 
 #### image setting
@@ -299,32 +416,37 @@ The central menu:
 3. **Plan-Driven Pull**: Pull only works from existing plans created by sync
 4. **Safe Defaults**: Enter keeps current value in settings; destructive actions require confirmation
 5. **No Downloads in Sync**: Sync is always dry-run; only pull downloads
+6. **Dynamic Discovery**: Sync automatically detects versions from upstream
 
 ---
 
-## Current status
+## Current Status
 
-รอบนี้ phase ที่พร้อมใช้งานแล้วคือ:
-- phase 0 input normalization (รองรับ alias, reject invalid inputs)
-- phase 1 policy loading (split config: global + per-OS, optional max_version, selection_policy)
-- phase 2 official listing discovery
-- phase 3 checksum planning + strict candidate guard + min_version/max_version guard
-- phase 4 dry-run state persistence (with version_selection metadata)
-- phase 5 cache HIT/MISS/INVALID/STALE + stale cache detection
-- phase 6 controlled download พร้อม progress MB/s + ETA + partial cleanup + retry policy
+### Phases Ready
+- Phase 0: input normalization (supports aliases, rejects invalid inputs)
+- Phase 1: policy loading (split config: global + per-OS, optional max_version, selection_policy)
+- Phase 2: official listing discovery with **dynamic upstream detection**
+- Phase 3: checksum planning + strict candidate guard + min_version/max_version guard
+- Phase 4: dry-run state persistence with **full discovery metadata**
+- Phase 5: cache HIT/MISS/INVALID/STALE + stale cache detection
+- Phase 6: controlled download with progress MB/s + ETA + partial cleanup + retry policy
 
 ### Improvements Added
-- Download progress แสดง MB/s และ ETA
-- Automatic cleanup ของ `.partial` files เมื่อ fail หรือถูก interrupt
-- Signal handling สำหรับ Ctrl+C interrupt
-- Error messages ที่ user-friendly พร้อม hints
-- รองรับ Ubuntu 20.04 (focal) เพิ่ม
-- รองรับ Debian 13 (trixie) เพิ่ม
-- รองรับ Rocky Linux 8 และ 9
-- รองรับ AlmaLinux 8 และ 9
+- Download progress shows MB/s and ETA
+- Automatic cleanup of `.partial` files on fail or interrupt
+- Signal handling for Ctrl+C interrupt
+- User-friendly error messages with hints
+- **Dynamic upstream version discovery** for all supported OS families
+- **Artifact preference logic** (qcow2 > img > others)
+- **Comprehensive artifact metadata tracking**
+- **Discovery evidence logging** in plan/manifest
+- Support for Ubuntu 20.04 (focal)
+- Support for Debian 12 (bookworm), 13 (trixie)
+- Support for Rocky Linux 8, 9, 10
+- Support for AlmaLinux 8, 9, 10
 - Stale cache detection (checksum, source_url, filename changes)
 - Cache states: HIT, MISS, INVALID, STALE
-- Retry policy สำหรับ failed downloads (3 attempts with exponential backoff)
+- Retry policy for failed downloads (3 attempts with exponential backoff)
 - Timeout handling improvements (URLError, HTTPError, TimeoutError)
 - Checksum mismatch test fixture
 - **Config split: global + per-OS files**
@@ -332,38 +454,137 @@ The central menu:
 - **max_version guard (optional)**
 - **selection_policy support (explicit/latest)**
 - **Debian auto/latest version discovery**
-- **Enhanced checksum parser** (รองรับทั้ง Ubuntu/Debian และ Rocky/AlmaLinux formats)
+- **Enhanced checksum parser** (supports Ubuntu/Debian and Rocky/AlmaLinux formats)
 - **Version selection evidence in plan/manifest**
 
 ### OS Coverage
-- Ubuntu 20.04 LTS (focal) - min_version: 20.04, policy: explicit
-- Ubuntu 22.04 LTS (jammy) - min_version: 20.04, policy: explicit
-- Ubuntu 24.04 LTS (noble) - min_version: 20.04, policy: explicit
-- Debian 12 (bookworm) - min_version: 12, policy: latest, supports auto/latest
-- Debian 13 (trixie) - min_version: 12, policy: latest, supports auto/latest
-- Rocky Linux 8 - min_version: 8
-- Rocky Linux 9 - min_version: 8
-- AlmaLinux 8 - min_version: 8
-- AlmaLinux 9 - min_version: 8
+- **Ubuntu 20.04 LTS (focal)** - min_version: 20.04, policy: explicit
+- **Ubuntu 22.04 LTS (jammy)** - min_version: 20.04, policy: explicit
+- **Ubuntu 24.04 LTS (noble)** - min_version: 20.04, policy: explicit
+- **Debian 12 (bookworm)** - min_version: 12, policy: latest, supports auto/latest
+- **Debian 13 (trixie)** - min_version: 12, policy: latest, supports auto/latest
+- **Rocky Linux 8** - min_version: 8, dynamic discovery enabled
+- **Rocky Linux 9** - min_version: 8, dynamic discovery enabled
+- **Rocky Linux 10** - min_version: 8, dynamic discovery enabled
+- **AlmaLinux 8** - min_version: 8, dynamic discovery enabled (stable only)
+- **AlmaLinux 9** - min_version: 8, dynamic discovery enabled (stable only)
+- **AlmaLinux 10** - min_version: 8, dynamic discovery enabled (stable only)
+- **Fedora 39-43** - min_version: 39, policy: latest, **DISABLED** pending path verification
 
 ### Known Limitations
-- **Fedora**: Official download site (download.fedoraproject.org) มี Anubis bot protection ทำให้ไม่สามารถใช้งานกับระบบ automation ได้โดยตรง ต้องใช้ mirror อื่นหรือรอการแก้ไขเพิ่มเติม
-- **Auto/latest mode**: Currently only supported for Debian. Ubuntu remains explicit-only.
+
+#### Fedora Status
+- **Discovery**: Working correctly via dl.fedoraproject.org
+- **Download paths**: Require verification before enabling
+- **Status**: Disabled by default with clear documentation
+- **Workaround**: Enable after validating image URLs and checksum locations
+
+#### Version Discovery
+- Ubuntu: Explicit mode only (intentional for LTS stability)
+- Rocky/AlmaLinux: Explicit mode only (intentional for enterprise stability)
+- Debian: Supports explicit + auto/latest modes
+- Fedora: Supports latest mode (when enabled)
 
 ### Architecture Support
 - amd64 (x86_64)
 - arm64 (aarch64)
 
 ### Error Handling
-- Unsupported OS: แสดงรายการ OS ที่รองรับ
+- Unsupported OS: shows list of supported OS
 - Unsupported version: clear error message
 - Below min_version: early rejection with clear message
 - Above max_version (if set): early rejection with clear message
 - Missing plan-id: usage hint
 - Bad plan-id: suggestion to run dry-run first
+- Discovery failures: logged in discovery metadata
 
 ### Remaining Gaps
-- cross-check กับ upstream metadata เพิ่มเติม
-- full integration tests with complete downloads (Smoke Pass sufficient for most cases)
-- Fedora support (requires mirror or bot protection bypass)
-- Extend auto/latest mode to other OS families (Ubuntu, Rocky, AlmaLinux)
+- Cross-check with extra upstream metadata beyond directory listings
+- Full integration tests with complete downloads (Smoke Pass sufficient for most cases)
+- Fedora enablement (requires path verification)
+- Extend auto/latest mode to Ubuntu, Rocky, AlmaLinux (if desired)
+
+---
+
+## Automated Version Detection Details
+
+### Implementation
+
+The system now implements automated version detection for all OS families:
+
+```python
+# Discovery pipeline
+candidates, metadata = discover_upstream_versions(os_name, cfg)
+valid_candidates, filter_log = filter_candidates_by_policy(candidates, os_cfg, os_name)
+selected_version, reason, selection_log = select_version_by_policy(
+    valid_candidates, os_cfg, requested_version
+)
+```
+
+### Discovery Sources
+
+| OS | Discovery URL | Method | Status |
+|----|---------------|--------|--------|
+| Ubuntu | cloud-images.ubuntu.com | HTML directory listing | Active |
+| Debian | cloud.debian.org/images/cloud/ | HTML directory listing | Active |
+| Rocky | download.rockylinux.org/pub/rocky/ | HTML directory listing | Active |
+| AlmaLinux | repo.almalinux.org/almalinux/ | HTML directory listing | Active |
+| Fedora | dl.fedoraproject.org/pub/fedor... | HTML directory listing | Discovery active, downloads disabled |
+
+### Policy Compliance
+
+All discovered versions are filtered through policy:
+
+1. **enabled check**: Skip if OS is disabled
+2. **min_version check**: Reject versions below minimum
+3. **max_version check**: Reject versions above maximum (if set)
+4. **stable-only filter**: Reject unstable/testing releases
+
+### Evidence Preservation
+
+Every discovery operation preserves evidence:
+- Raw candidates from upstream
+- Policy filter decisions
+- Final selection rationale
+- All logged in plan.json for auditability
+
+---
+
+## Artifact Selection Details
+
+### Preference Scoring
+
+```python
+preference_scores = {
+    "qcow2": 100,      # Cloud-native format
+    "raw": 80,         # Raw disk (Ubuntu uses .img)
+    "vmdk": 60,        # VMware
+    "vdi": 60,         # VirtualBox
+    "iso": 50,         # Installer media
+    "tar": 30,         # Archive
+}
+
+# Bonus for cloud-init images
+if "cloud" in filename or "generic" in filename:
+    score += 10
+```
+
+### Metadata Fields
+
+```json
+{
+  "artifact_metadata": {
+    "source_filename": "original-filename.qcow2",
+    "artifact_extension": ".qcow2",
+    "disk_format": "qcow2",
+    "artifact_type": "disk_image",
+    "preference_score": 110,
+    "image_variant": "cloud"
+  }
+}
+```
+
+This ensures:
+- qcow2 is preferred when both qcow2 and img exist
+- Official artifacts preserved (no guessing from extension alone)
+- Real metadata tracked separately from filename

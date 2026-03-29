@@ -1,12 +1,24 @@
 {
   "os": "rocky",
+  "enabled": true,
   "min_version": "8",
+  "max_version": null,
+  "selection_policy": "explicit",
+  "release_channel": "stable",
+  "default_arch": "x86_64",
+  "notes": "Rocky Linux with dynamic upstream version discovery supporting versions 8, 9, 10+",
   "aliases": {},
   "architectures": {
     "amd64": "x86_64",
     "x86_64": "x86_64",
     "arm64": "aarch64",
     "aarch64": "aarch64"
+  },
+  "discovery": {
+    "method": "html_directory_listing",
+    "url": "https://download.rockylinux.org/pub/rocky/",
+    "version_pattern": "^([0-9]+)/?$",
+    "exclude_patterns": ["^\\.?", "^lost\\+found$", "^RHEL"]
   },
   "sources": {
     "8": {
@@ -25,6 +37,16 @@
       "listing_url": "https://download.rockylinux.org/pub/rocky/9/images/x86_64/",
       "filename_patterns": [
         "Rocky-9-GenericCloud.latest.x86_64.qcow2"
+      ],
+      "checksum_file": "CHECKSUM",
+      "checksum_algorithm": "sha256"
+    },
+    "10": {
+      "release_name": "10",
+      "artifact_type": "qcow2",
+      "listing_url": "https://download.rockylinux.org/pub/rocky/10/images/x86_64/",
+      "filename_patterns": [
+        "Rocky-10-GenericCloud.latest.x86_64.qcow2"
       ],
       "checksum_file": "CHECKSUM",
       "checksum_algorithm": "sha256"

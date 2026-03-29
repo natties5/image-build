@@ -1,19 +1,34 @@
 {
   "os": "ubuntu",
+  "enabled": true,
   "min_version": "20.04",
   "max_version": null,
   "selection_policy": "explicit",
   "release_channel": "lts",
+  "default_arch": "x86_64",
+  "notes": "Ubuntu LTS releases with dynamic upstream discovery. Explicit mode only for stability.",
   "aliases": {
+    "focal": "20.04",
     "jammy": "22.04",
-    "noble": "24.04",
-    "focal": "20.04"
+    "noble": "24.04"
   },
   "architectures": {
     "amd64": "x86_64",
     "x86_64": "x86_64",
     "arm64": "aarch64",
     "aarch64": "aarch64"
+  },
+  "discovery": {
+    "method": "html_directory_listing",
+    "url": "https://cloud-images.ubuntu.com/",
+    "version_pattern": "^(focal|jammy|noble|oracular)/?$",
+    "release_mapping": {
+      "focal": "20.04",
+      "jammy": "22.04",
+      "noble": "24.04",
+      "oracular": "24.10"
+    },
+    "notes": "Discovers LTS releases from official cloud-images site"
   },
   "sources": {
     "20.04": {
@@ -25,7 +40,8 @@
         "focal-server-cloudimg-arm64.img"
       ],
       "checksum_file": "SHA256SUMS",
-      "checksum_algorithm": "sha256"
+      "checksum_algorithm": "sha256",
+      "disk_format": "raw"
     },
     "22.04": {
       "release_name": "jammy",
@@ -36,7 +52,8 @@
         "jammy-server-cloudimg-arm64.img"
       ],
       "checksum_file": "SHA256SUMS",
-      "checksum_algorithm": "sha256"
+      "checksum_algorithm": "sha256",
+      "disk_format": "raw"
     },
     "24.04": {
       "release_name": "noble",
@@ -47,7 +64,8 @@
         "noble-server-cloudimg-arm64.img"
       ],
       "checksum_file": "SHA256SUMS",
-      "checksum_algorithm": "sha256"
+      "checksum_algorithm": "sha256",
+      "disk_format": "raw"
     }
   }
 }

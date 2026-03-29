@@ -1,0 +1,59 @@
+{
+  "os": "fedora",
+  "enabled": false,
+  "min_version": "39",
+  "max_version": null,
+  "selection_policy": "latest",
+  "release_channel": "stable",
+  "default_arch": "x86_64",
+  "notes": "DISCLAIMER: Fedora is currently DISABLED. While upstream discovery via dl.fedoraproject.org works correctly, the specific Cloud image paths require verification. Enable after validating image URLs and checksum locations. See KNOWN_LIMITATIONS.md",
+  "aliases": {},
+  "architectures": {
+    "amd64": "x86_64",
+    "x86_64": "x86_64",
+    "arm64": "aarch64",
+    "aarch64": "aarch64"
+  },
+  "discovery": {
+    "method": "html_directory_listing",
+    "url": "https://dl.fedoraproject.org/pub/fedora/linux/releases/",
+    "version_pattern": "^([0-9]+)/?$",
+    "min_discovery_version": 39,
+    "status": "discovery_works_paths_need_verification"
+  },
+  "sources": {
+    "39": {
+      "release_name": "39",
+      "artifact_type": "qcow2",
+      "listing_url": "https://dl.fedoraproject.org/pub/fedora/linux/releases/39/Cloud/x86_64/images/",
+      "filename_patterns": [
+        "Fedora-Cloud-Base-39-*.x86_64.qcow2"
+      ],
+      "checksum_file": "Fedora-Cloud-39-*.x86_64-CHECKSUM",
+      "checksum_algorithm": "sha256",
+      "status": "unverified"
+    },
+    "40": {
+      "release_name": "40",
+      "artifact_type": "qcow2",
+      "listing_url": "https://dl.fedoraproject.org/pub/fedora/linux/releases/40/Cloud/x86_64/images/",
+      "filename_patterns": [
+        "Fedora-Cloud-Base-40-*.x86_64.qcow2"
+      ],
+      "checksum_file": "Fedora-Cloud-40-*.x86_64-CHECKSUM",
+      "checksum_algorithm": "sha256",
+      "status": "unverified"
+    },
+    "41": {
+      "release_name": "41",
+      "artifact_type": "qcow2",
+      "listing_url": "https://dl.fedoraproject.org/pub/fedora/linux/releases/41/Cloud/x86_64/images/",
+      "filename_patterns": [
+        "Fedora-Cloud-Base-41-*.x86_64.qcow2"
+      ],
+      "checksum_file": "Fedora-Cloud-41-*.x86_64-CHECKSUM",
+      "checksum_algorithm": "sha256",
+      "status": "unverified"
+    }
+  }
+}

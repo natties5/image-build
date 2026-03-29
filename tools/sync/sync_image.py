@@ -1,8 +1,20 @@
 #!/usr/bin/env python3
+"""
+Sync Image System - Enhanced with Dynamic Upstream Discovery
+
+This module provides image synchronization with:
+- Dynamic upstream version discovery from official sources
+- Policy-driven version filtering (min_version, max_version, selection_policy)
+- Artifact format preference (qcow2 over img)
+- Comprehensive evidence logging
+- Plan-driven execution
+"""
+
 import argparse
 import hashlib
 import html.parser
 import json
+import re
 import signal
 import sys
 import time
@@ -11,6 +23,7 @@ import urllib.request
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 from urllib.parse import urljoin, urlparse
 
 
@@ -54,6 +67,7 @@ CHUNK_SIZE = 4 * 1024 * 1024
 
 
 class LinkParser(html.parser.HTMLParser):
+    """Parse HTML links from directory listings"""
     def __init__(self):
         super().__init__()
         self.links = []
@@ -94,14 +108,24 @@ def ensure_allowed_host(url: str, cfg: dict) -> None:
         raise RuntimeError(f"host not allowed: {host}")
 
 
-def http_get_text(url: str, cfg: dict) -> str:
+def http_get_text(url: str, cfg: dict, timeout: Optional[int] = None) -> str:
+    """Fetch text content from URL with error handling"""
     ensure_allowed_host(url, cfg)
     req = urllib.request.Request(url, headers={"User-Agent": cfg["user_agent"]})
-    with urllib.request.urlopen(req, timeout=cfg.get("request_timeout_seconds", 30)) as r:
-        return r.read().decode("utf-8", errors="ignore")
+    actual_timeout = timeout or cfg.get("request_timeout_seconds", 30)
+    try:
+        with urllib.request.urlopen(req, timeout=actual_timeout) as r:
+            return r.read().decode("utf-8", errors="ignore")
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"HTTP {e.code} when fetching {url}: {e.reason}")
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"URL error when fetching {url}: {e.reason}")
+    except TimeoutError:
+        raise RuntimeError(f"Timeout when fetching {url} (timeout={actual_timeout}s)")
 
 
 def canonical_os(config: dict, os_name: str) -> str:
+    """Normalize OS name to canonical form"""
     value = os_name.strip().lower()
     if value not in config["os_configs"]:
         raise ValueError(f"unsupported os: {os_name}")
@@ -111,12 +135,12 @@ def canonical_os(config: dict, os_name: str) -> str:
 def _compare_versions(version1: str, version2: str) -> int:
     """Compare two versions. Returns -1 if v1 < v2, 0 if equal, 1 if v1 > v2"""
     try:
+        # Try float comparison first (Ubuntu-style: 20.04, 22.04)
         if "." in str(version1) or "." in str(version2):
-            # Ubuntu-style float comparison
             v1 = float(version1)
             v2 = float(version2)
         else:
-            # Debian-style integer comparison
+            # Integer comparison (Debian/Rocky/AlmaLinux-style: 12, 13, 8, 9)
             v1 = int(version1)
             v2 = int(version2)
         if v1 < v2:
@@ -133,116 +157,528 @@ def _compare_versions(version1: str, version2: str) -> int:
         return 0
 
 
-def _check_version_bounds(version: str, min_version: str, max_version: str | None, os_name: str) -> None:
+def _check_version_bounds(version: str, min_version: str, max_version: Optional[str], os_name: str) -> None:
     """Check if version is within bounds (min_version <= version <= max_version if max_version exists)"""
-    # Check min_version
-    if _compare_versions(version, min_version) < 0:
+    if min_version and _compare_versions(version, min_version) < 0:
         raise ValueError(f"version {version} is below minimum supported version {min_version} for {os_name}")
     
-    # Check max_version if present
     if max_version is not None and _compare_versions(version, max_version) > 0:
         raise ValueError(f"version {version} is above maximum supported version {max_version} for {os_name}")
 
 
-def _discover_debian_versions(cfg: dict) -> tuple[str, str, list]:
-    """Discover available Debian versions from upstream and select the latest valid one.
-    Returns: (selected_version, selection_reason, discovery_log)"""
-    os_cfg = cfg["os_configs"]["debian"]
-    min_version = os_cfg.get("min_version")
-    max_version = os_cfg.get("max_version")
-    
-    # Get all available sources
-    sources = os_cfg.get("sources", {})
-    aliases = os_cfg.get("aliases", {})
-    
+# ============================================================================
+# UPSTREAM VERSION DISCOVERY
+# ============================================================================
+
+def _discover_ubuntu_versions(cfg: dict) -> tuple[list, dict]:
+    """
+    Discover Ubuntu versions from official cloud-images site.
+    Returns: (candidates, discovery_metadata)
+    """
+    discovery_url = "https://cloud-images.ubuntu.com/"
     discovery_log = []
     candidates = []
     
-    # Build list of available versions
-    for version, source in sources.items():
-        try:
-            _check_version_bounds(version, min_version, max_version, "debian")
-            candidates.append({
+    try:
+        html = http_get_text(discovery_url, cfg, timeout=30)
+        parser = LinkParser()
+        parser.feed(html)
+        
+        # Ubuntu uses release codenames as directories
+        # Look for LTS releases: focal (20.04), jammy (22.04), noble (24.04)
+        release_patterns = {
+            "focal": "20.04",
+            "jammy": "22.04",
+            "noble": "24.04",
+            "oracular": "24.10",
+        }
+        
+        for link in parser.links:
+            link = link.rstrip("/")
+            if link in release_patterns:
+                version = release_patterns[link]
+                candidates.append({
+                    "version": version,
+                    "release_name": link,
+                    "discovery_source": discovery_url,
+                    "discovery_method": "html_directory_listing"
+                })
+                discovery_log.append({
+                    "version": version,
+                    "release_name": link,
+                    "source_url": discovery_url,
+                    "status": "discovered"
+                })
+        
+    except Exception as e:
+        discovery_log.append({
+            "source_url": discovery_url,
+            "status": "discovery_failed",
+            "error": str(e)
+        })
+    
+    # Sort by version descending
+    candidates.sort(key=lambda x: float(x["version"]) if "." in x["version"] else int(x["version"]), reverse=True)
+    
+    metadata = {
+        "discovery_source": discovery_url,
+        "discovery_method": "html_directory_listing",
+        "discovery_log": discovery_log,
+        "raw_candidates_found": len(candidates)
+    }
+    
+    return candidates, metadata
+
+
+def _discover_debian_versions(cfg: dict) -> tuple[list, dict]:
+    """
+    Discover Debian versions from official cloud.debian.org.
+    Returns: (candidates, discovery_metadata)
+    """
+    discovery_url = "https://cloud.debian.org/images/cloud/"
+    discovery_log = []
+    candidates = []
+    
+    try:
+        html = http_get_text(discovery_url, cfg, timeout=30)
+        parser = LinkParser()
+        parser.feed(html)
+        
+        # Debian uses release names as directories
+        release_patterns = {
+            "bookworm": "12",
+            "trixie": "13",
+            "sid": "unstable"
+        }
+        
+        for link in parser.links:
+            link = link.rstrip("/")
+            if link in release_patterns:
+                version = release_patterns[link]
+                candidates.append({
+                    "version": version,
+                    "release_name": link,
+                    "discovery_source": discovery_url,
+                    "discovery_method": "html_directory_listing"
+                })
+                discovery_log.append({
+                    "version": version,
+                    "release_name": link,
+                    "source_url": discovery_url,
+                    "status": "discovered"
+                })
+        
+    except Exception as e:
+        discovery_log.append({
+            "source_url": discovery_url,
+            "status": "discovery_failed",
+            "error": str(e)
+        })
+    
+    # Sort by version descending (handle "unstable" specially)
+    def version_key(x):
+        v = x["version"]
+        if v == "unstable":
+            return 999
+        return int(v) if v.isdigit() else float(v)
+    
+    candidates.sort(key=version_key, reverse=True)
+    
+    metadata = {
+        "discovery_source": discovery_url,
+        "discovery_method": "html_directory_listing",
+        "discovery_log": discovery_log,
+        "raw_candidates_found": len(candidates)
+    }
+    
+    return candidates, metadata
+
+
+def _discover_rocky_versions(cfg: dict) -> tuple[list, dict]:
+    """
+    Discover Rocky Linux versions from official download site.
+    Returns: (candidates, discovery_metadata)
+    """
+    discovery_url = "https://download.rockylinux.org/pub/rocky/"
+    discovery_log = []
+    candidates = []
+    
+    try:
+        html = http_get_text(discovery_url, cfg, timeout=30)
+        parser = LinkParser()
+        parser.feed(html)
+        
+        # Look for version directories (8, 9, 10, etc.)
+        version_pattern = re.compile(r'^([0-9]+)/?$')
+        
+        for link in parser.links:
+            match = version_pattern.match(link)
+            if match:
+                version = match.group(1)
+                candidates.append({
+                    "version": version,
+                    "release_name": version,
+                    "discovery_source": discovery_url,
+                    "discovery_method": "html_directory_listing"
+                })
+                discovery_log.append({
+                    "version": version,
+                    "source_url": discovery_url,
+                    "status": "discovered"
+                })
+        
+    except Exception as e:
+        discovery_log.append({
+            "source_url": discovery_url,
+            "status": "discovery_failed",
+            "error": str(e)
+        })
+    
+    # Sort by version descending
+    candidates.sort(key=lambda x: int(x["version"]), reverse=True)
+    
+    metadata = {
+        "discovery_source": discovery_url,
+        "discovery_method": "html_directory_listing",
+        "discovery_log": discovery_log,
+        "raw_candidates_found": len(candidates)
+    }
+    
+    return candidates, metadata
+
+
+def _discover_almalinux_versions(cfg: dict) -> tuple[list, dict]:
+    """
+    Discover AlmaLinux versions from official repo site.
+    Returns: (candidates, discovery_metadata)
+    """
+    discovery_url = "https://repo.almalinux.org/almalinux/"
+    discovery_log = []
+    candidates = []
+    
+    try:
+        html = http_get_text(discovery_url, cfg, timeout=30)
+        parser = LinkParser()
+        parser.feed(html)
+        
+        # Look for version directories (8, 9, 10, etc.)
+        version_pattern = re.compile(r'^([0-9]+)/?$')
+        
+        for link in parser.links:
+            match = version_pattern.match(link)
+            if match:
+                version = match.group(1)
+                candidates.append({
+                    "version": version,
+                    "release_name": version,
+                    "discovery_source": discovery_url,
+                    "discovery_method": "html_directory_listing"
+                })
+                discovery_log.append({
+                    "version": version,
+                    "source_url": discovery_url,
+                    "status": "discovered"
+                })
+        
+    except Exception as e:
+        discovery_log.append({
+            "source_url": discovery_url,
+            "status": "discovery_failed",
+            "error": str(e)
+        })
+    
+    # Sort by version descending
+    candidates.sort(key=lambda x: int(x["version"]), reverse=True)
+    
+    metadata = {
+        "discovery_source": discovery_url,
+        "discovery_method": "html_directory_listing",
+        "discovery_log": discovery_log,
+        "raw_candidates_found": len(candidates)
+    }
+    
+    return candidates, metadata
+
+
+def _discover_fedora_versions(cfg: dict) -> tuple[list, dict]:
+    """
+    Discover Fedora versions from official release tree (automation-friendly path).
+    Uses dl.fedoraproject.org which is more automation-friendly than download.fedoraproject.org.
+    Returns: (candidates, discovery_metadata)
+    """
+    # Use the mirror/direct download path which is more automation-friendly
+    discovery_url = "https://dl.fedoraproject.org/pub/fedora/linux/releases/"
+    discovery_log = []
+    candidates = []
+    
+    try:
+        html = http_get_text(discovery_url, cfg, timeout=30)
+        parser = LinkParser()
+        parser.feed(html)
+        
+        # Look for version directories (39, 40, 41, etc.)
+        version_pattern = re.compile(r'^([0-9]+)/?$')
+        
+        for link in parser.links:
+            match = version_pattern.match(link)
+            if match:
+                version = match.group(1)
+                # Fedora versions typically start from 20+ in modern era
+                if int(version) >= 20:
+                    candidates.append({
+                        "version": version,
+                        "release_name": version,
+                        "discovery_source": discovery_url,
+                        "discovery_method": "html_directory_listing"
+                    })
+                    discovery_log.append({
+                        "version": version,
+                        "source_url": discovery_url,
+                        "status": "discovered"
+                    })
+        
+    except Exception as e:
+        discovery_log.append({
+            "source_url": discovery_url,
+            "status": "discovery_failed",
+            "error": str(e)
+        })
+    
+    # Sort by version descending
+    candidates.sort(key=lambda x: int(x["version"]), reverse=True)
+    
+    metadata = {
+        "discovery_source": discovery_url,
+        "discovery_method": "html_directory_listing",
+        "discovery_log": discovery_log,
+        "raw_candidates_found": len(candidates)
+    }
+    
+    return candidates, metadata
+
+
+def discover_upstream_versions(os_name: str, cfg: dict) -> tuple[list, dict]:
+    """
+    Discover available versions from official upstream sources.
+    Returns: (candidates, discovery_metadata)
+    """
+    discovery_functions = {
+        "ubuntu": _discover_ubuntu_versions,
+        "debian": _discover_debian_versions,
+        "rocky": _discover_rocky_versions,
+        "almalinux": _discover_almalinux_versions,
+        "fedora": _discover_fedora_versions,
+    }
+    
+    if os_name not in discovery_functions:
+        return [], {"error": f"No upstream discovery available for {os_name}"}
+    
+    return discovery_functions[os_name](cfg)
+
+
+def filter_candidates_by_policy(
+    candidates: list,
+    os_cfg: dict,
+    os_name: str
+) -> tuple[list, list]:
+    """
+    Filter discovered candidates by policy (min_version, max_version, enabled).
+    Returns: (valid_candidates, filter_log)
+    """
+    min_version = os_cfg.get("min_version")
+    max_version = os_cfg.get("max_version")
+    enabled = os_cfg.get("enabled", True)
+    
+    valid_candidates = []
+    filter_log = []
+    
+    if not enabled:
+        filter_log.append({
+            "status": "os_disabled",
+            "reason": "OS is disabled in configuration"
+        })
+        return [], filter_log
+    
+    for candidate in candidates:
+        version = candidate["version"]
+        
+        # Skip unstable/testing versions in production
+        if version in ("unstable", "testing", "rawhide"):
+            filter_log.append({
                 "version": version,
-                "release_name": source.get("release_name", ""),
-                "source": source
+                "status": "filtered",
+                "reason": "unstable/testing releases excluded by policy"
             })
-            discovery_log.append({
+            continue
+        
+        try:
+            # min_version is required per spec, but handle None gracefully
+            effective_min = min_version if min_version is not None else "0"
+            _check_version_bounds(version, effective_min, max_version, os_name)
+            valid_candidates.append(candidate)
+            filter_log.append({
                 "version": version,
-                "release_name": source.get("release_name", ""),
-                "status": "valid"
+                "status": "valid",
+                "reason": f"within bounds {effective_min}-{max_version or 'unlimited'}"
             })
         except ValueError as e:
-            discovery_log.append({
+            filter_log.append({
                 "version": version,
-                "release_name": source.get("release_name", ""),
-                "status": "rejected",
+                "status": "filtered",
                 "reason": str(e)
             })
     
-    if not candidates:
-        raise ValueError(f"no valid Debian version found between {min_version} and {max_version or 'unlimited'}")
+    return valid_candidates, filter_log
+
+
+def select_version_by_policy(
+    candidates: list,
+    os_cfg: dict,
+    requested_version: str
+) -> tuple[Optional[str], str, list]:
+    """
+    Select version based on policy and request.
+    Returns: (selected_version, selection_reason, selection_log)
+    """
+    selection_policy = os_cfg.get("selection_policy", "explicit")
+    selection_log = []
     
-    # Sort by version and pick the latest
-    candidates.sort(key=lambda x: float(x["version"]) if "." in x["version"] else int(x["version"]), reverse=True)
-    selected = candidates[0]
+    # Handle auto/latest mode
+    if requested_version in ("auto", "latest"):
+        if selection_policy not in ("latest", "auto"):
+            return None, f"Auto/latest mode not supported (policy: {selection_policy})", selection_log
+        
+        if not candidates:
+            return None, "No valid candidates found", selection_log
+        
+        # Sort candidates by version and pick the latest
+        def version_key(x):
+            v = x["version"]
+            try:
+                return float(v) if "." in v else int(v)
+            except ValueError:
+                return 0
+        
+        sorted_candidates = sorted(candidates, key=version_key, reverse=True)
+        selected = sorted_candidates[0]
+        
+        min_version = os_cfg.get("min_version", "unknown")
+        max_version = os_cfg.get("max_version")
+        
+        reason = f"latest valid version >= {min_version}"
+        if max_version:
+            reason += f" and <= {max_version}"
+        
+        selection_log.append({
+            "requested": requested_version,
+            "selected": selected["version"],
+            "method": "latest_policy",
+            "candidates_considered": len(candidates)
+        })
+        
+        return selected["version"], reason, selection_log
     
-    selection_reason = f"latest valid version >= {min_version}"
-    if max_version:
-        selection_reason += f" and <= {max_version}"
+    # Explicit mode - check if requested version exists in candidates
+    for candidate in candidates:
+        if candidate["version"] == requested_version:
+            selection_log.append({
+                "requested": requested_version,
+                "selected": requested_version,
+                "method": "explicit_match"
+            })
+            return requested_version, f"explicit version {requested_version}", selection_log
     
-    return selected["version"], selection_reason, discovery_log
+    # Check config sources as fallback
+    sources = os_cfg.get("sources", {})
+    if requested_version in sources:
+        selection_log.append({
+            "requested": requested_version,
+            "selected": requested_version,
+            "method": "explicit_config",
+            "note": "version from static config (not discovered upstream)"
+        })
+        return requested_version, f"explicit version {requested_version} (from config)", selection_log
+    
+    return None, f"Version {requested_version} not found in discovered candidates or config", selection_log
 
 
 def canonical_version(config: dict, os_name: str, version: str) -> tuple[str, dict]:
-    """Resolve version to canonical form with auto/latest support.
-    Returns: (canonical_version, version_metadata)"""
+    """
+    Resolve version to canonical form with dynamic discovery support.
+    Returns: (canonical_version, version_metadata)
+    """
     value = version.strip().lower()
     os_cfg = config["os_configs"][os_name]
     aliases = os_cfg.get("aliases", {})
-    min_version = os_cfg.get("min_version")
-    max_version = os_cfg.get("max_version")  # Now optional (can be None)
     selection_policy = os_cfg.get("selection_policy", "explicit")
     
+    # Initialize metadata
     metadata = {
         "requested_version": version,
         "selection_mode": "explicit",
-        "discovery_log": None,
-        "selection_reason": None
+        "upstream_discovery": {},
+        "policy_filter": {},
+        "version_selection": {},
+        "resolved_from_alias": None
     }
     
-    # Handle auto/latest selection for Debian
-    if value in ("auto", "latest"):
-        if os_name != "debian":
-            raise ValueError(f"version '{version}' is only supported for Debian (os: {os_name})")
-        if selection_policy not in ("latest", "auto"):
-            raise ValueError(f"version '{version}' is not supported for {os_name} (selection_policy: {selection_policy})")
-        
-        metadata["selection_mode"] = value
-        selected_version, selection_reason, discovery_log = _discover_debian_versions(config)
-        metadata["discovery_log"] = discovery_log
-        metadata["selection_reason"] = selection_reason
-        
-        return selected_version, metadata
-    
-    # Resolve alias to canonical version
-    canonical = None
+    # Resolve alias first
     if value in aliases:
-        canonical = aliases[value]
+        resolved_alias = aliases[value]
         metadata["resolved_from_alias"] = value
-    elif value in os_cfg.get("sources", {}):
-        canonical = value
+        value = resolved_alias
+    
+    # Check if this OS supports upstream discovery
+    discovery_enabled = os_name in ("ubuntu", "debian", "rocky", "almalinux", "fedora")
+    
+    if discovery_enabled:
+        # Perform upstream discovery
+        candidates, discovery_metadata = discover_upstream_versions(os_name, config)
+        metadata["upstream_discovery"] = discovery_metadata
+        
+        # Filter by policy
+        valid_candidates, filter_log = filter_candidates_by_policy(candidates, os_cfg, os_name)
+        metadata["policy_filter"] = {
+            "candidates_before_filter": len(candidates),
+            "candidates_after_filter": len(valid_candidates),
+            "filter_log": filter_log
+        }
+        
+        # Select version based on policy
+        selected_version, selection_reason, selection_log = select_version_by_policy(
+            valid_candidates, os_cfg, value
+        )
+        
+        metadata["version_selection"] = {
+            "selected_version": selected_version,
+            "selection_reason": selection_reason,
+            "selection_log": selection_log
+        }
+        
+        if selected_version:
+            if value in ("auto", "latest"):
+                metadata["selection_mode"] = value
+            return selected_version, metadata
+        else:
+            # If discovery failed but we have config sources, fall back
+            sources = os_cfg.get("sources", {})
+            if value in sources:
+                metadata["version_selection"]["fallback"] = "config_source"
+                metadata["version_selection"]["warning"] = "Using config fallback, upstream discovery did not find this version"
+                return value, metadata
+            else:
+                raise ValueError(f"Version {version} not found in upstream discovery or config for {os_name}")
     else:
-        raise ValueError(f"unsupported version for {os_name}: {version}")
-    
-    # Check version bounds
-    if min_version:
-        _check_version_bounds(canonical, min_version, max_version, os_name)
-    
-    return canonical, metadata
+        # No upstream discovery - use config only
+        sources = os_cfg.get("sources", {})
+        if value in sources:
+            return value, metadata
+        else:
+            raise ValueError(f"unsupported version for {os_name}: {version}")
 
 
 def canonical_arch(config: dict, os_name: str, arch: str) -> str:
+    """Normalize architecture to canonical form"""
     value = arch.strip().lower()
     os_cfg = config["os_configs"][os_name]
     arch_map = os_cfg.get("architectures", {})
@@ -252,57 +688,156 @@ def canonical_arch(config: dict, os_name: str, arch: str) -> str:
 
 
 def parse_listing_links(html_text: str) -> list[str]:
+    """Parse HTML to extract link hrefs"""
     parser = LinkParser()
     parser.feed(html_text)
     return parser.links
 
 
-def strict_candidate_select(links: list[str], patterns: list[str], arch: str) -> str:
+def determine_artifact_metadata(filename: str, patterns: list[str]) -> dict:
+    """
+    Determine artifact metadata from filename and patterns.
+    Returns metadata including disk_format, artifact_type, preference_score.
+    """
+    metadata = {
+        "source_filename": filename,
+        "artifact_extension": Path(filename).suffix.lower(),
+        "disk_format": "unknown",
+        "artifact_type": "unknown",
+        "preference_score": 0
+    }
+    
+    # Determine disk format from extension
+    ext = metadata["artifact_extension"]
+    if ext == ".qcow2":
+        metadata["disk_format"] = "qcow2"
+        metadata["artifact_type"] = "disk_image"
+        metadata["preference_score"] = 100  # Highest preference
+    elif ext == ".img":
+        metadata["disk_format"] = "raw"
+        metadata["artifact_type"] = "disk_image"
+        metadata["preference_score"] = 80
+    elif ext == ".iso":
+        metadata["disk_format"] = "iso"
+        metadata["artifact_type"] = "installer"
+        metadata["preference_score"] = 50
+    elif ext == ".tar" or ext == ".tar.gz" or filename.endswith(".tar.xz"):
+        metadata["disk_format"] = "tar"
+        metadata["artifact_type"] = "archive"
+        metadata["preference_score"] = 30
+    elif ext == ".vmdk":
+        metadata["disk_format"] = "vmdk"
+        metadata["artifact_type"] = "disk_image"
+        metadata["preference_score"] = 60
+    elif ext == ".vdi":
+        metadata["disk_format"] = "vdi"
+        metadata["artifact_type"] = "disk_image"
+        metadata["preference_score"] = 60
+    
+    # Check if filename indicates cloud-init or generic image (preferred)
+    lower_filename = filename.lower()
+    if "cloud" in lower_filename or "generic" in lower_filename:
+        metadata["preference_score"] += 10
+        metadata["image_variant"] = "cloud"
+    
+    return metadata
+
+
+def strict_candidate_select_with_preference(
+    links: list[str],
+    patterns: list[str],
+    arch: str
+) -> tuple[str, dict]:
+    """
+    Select best candidate with artifact preference (qcow2 > img > others).
+    Returns: (selected_filename, artifact_metadata)
+    """
     candidates = []
+    seen_filenames = set()
+    
     for link in links:
+        # Skip duplicates
+        if link in seen_filenames:
+            continue
+        seen_filenames.add(link)
         name = link.strip()
         if not name:
             continue
+        
         # Skip checksum and metadata files
-        if name.endswith('.CHECKSUM') or name.endswith('.asc') or name.endswith('.sig'):
+        skip_extensions = ('.checksum', '.asc', '.sig', '.sha256', '.sha512', '.md5', '.txt')
+        if any(name.lower().endswith(ext) for ext in skip_extensions):
             continue
+        
         for pattern in patterns:
-            # Check if pattern matches arch (supports amd64/x86_64 and arm64/aarch64 naming)
-            if arch == "x86_64" and not any(x in pattern for x in ["amd64", "x86_64"]):
-                continue
-            if arch == "aarch64" and not any(x in pattern for x in ["arm64", "aarch64"]):
-                continue
+            # Check if pattern matches arch
+            pattern_lower = pattern.lower()
+            if arch == "x86_64":
+                if not any(x in pattern_lower for x in ["amd64", "x86_64", "x64"]):
+                    continue
+            if arch == "aarch64":
+                if not any(x in pattern_lower for x in ["arm64", "aarch64"]):
+                    continue
+            
             if pattern in name:
-                candidates.append(name)
+                metadata = determine_artifact_metadata(name, patterns)
+                candidates.append({
+                    "filename": name,
+                    "pattern": pattern,
+                    "metadata": metadata
+                })
+    
+    if not candidates:
+        raise RuntimeError(f"No candidates found matching patterns: {patterns}")
+    
+    # Sort by preference score (highest first)
+    candidates.sort(key=lambda x: x["metadata"]["preference_score"], reverse=True)
+    
+    # If multiple candidates have the same top score, raise ambiguity error
+    top_score = candidates[0]["metadata"]["preference_score"]
+    top_candidates = [c for c in candidates if c["metadata"]["preference_score"] == top_score]
+    
+    if len(top_candidates) > 1:
+        raise RuntimeError(f"Ambiguous candidates with same preference score ({top_score}): {[c['filename'] for c in top_candidates]}")
+    
+    selected = top_candidates[0]
+    return selected["filename"], selected["metadata"]
 
-    candidates = sorted(set(candidates))
-    if len(candidates) != 1:
-        raise RuntimeError(f"ambiguous candidates: {candidates}")
-    return candidates[0]
+
+def strict_candidate_select(links: list[str], patterns: list[str], arch: str) -> str:
+    """Legacy function - delegates to new preference-aware version"""
+    filename, _ = strict_candidate_select_with_preference(links, patterns, arch)
+    return filename
 
 
 def parse_checksum(checksum_text: str, filename: str) -> str:
+    """Parse checksum from text for given filename"""
     for line in checksum_text.splitlines():
         line = line.strip()
         if not line or line.startswith('#'):
             continue
         if filename not in line:
             continue
-        # Handle standard format: "hash filename" (Ubuntu/Debian)
+        
+        # Handle "SHA256 (filename) = hash" format (Rocky/AlmaLinux)
+        if line.startswith("SHA256 (") or line.startswith("SHA512 ("):
+            parts = line.split()
+            if len(parts) >= 4 and parts[1].startswith("("):
+                return parts[-1]
+        
+        # Handle standard "hash filename" format (Ubuntu/Debian)
         parts = line.split()
-        if not parts:
-            continue
-        # Check if it's the "SHA256 (filename) = hash" format (Rocky/AlmaLinux)
-        if parts[0] in ("SHA256", "SHA512") and len(parts) >= 4 and parts[1].startswith("("):
-            # Format: SHA256 (filename) = hash
-            return parts[-1]
-        # Standard format: hash filename
-        if parts[0] != filename:
-            return parts[0]
-    raise RuntimeError(f"checksum not found for {filename}")
+        if len(parts) >= 2:
+            # Check if first part looks like a hash
+            potential_hash = parts[0]
+            if len(potential_hash) in (32, 40, 64, 128):  # MD5, SHA1, SHA256, SHA512 lengths
+                return potential_hash
+    
+    raise RuntimeError(f"Checksum not found for {filename}")
 
 
 def file_digest(path: Path, algorithm: str) -> str:
+    """Calculate file digest using specified algorithm"""
     h = hashlib.new(algorithm)
     with path.open("rb") as f:
         for chunk in iter(lambda: f.read(1024 * 1024), b""):
@@ -311,20 +846,32 @@ def file_digest(path: Path, algorithm: str) -> str:
 
 
 def write_json(path: Path, payload: dict) -> None:
+    """Write JSON payload to file with pretty formatting"""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, ensure_ascii=False)
 
 
 def append_jsonl(path: Path, payload: dict) -> None:
+    """Append JSON line to log file"""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
 
-def build_paths(cfg: dict, os_name: str, release_name: str, arch: str, artifact_type: str, cache_key: str, plan_id: str) -> dict:
+def build_paths(
+    cfg: dict,
+    os_name: str,
+    release_name: str,
+    arch: str,
+    artifact_type: str,
+    cache_key: str,
+    plan_id: str
+) -> dict:
+    """Build all necessary paths for plan execution"""
     plan_dir = REPO_ROOT / cfg["state_root"] / plan_id
     cache_dir = REPO_ROOT / cfg["cache_root"] / os_name / release_name / arch / artifact_type / cache_key[:16]
+    
     return {
         "plan_dir": plan_dir,
         "plan_file": plan_dir / "plan.json",
@@ -338,31 +885,53 @@ def build_paths(cfg: dict, os_name: str, release_name: str, arch: str, artifact_
 
 
 def build_plan(cfg: dict, os_name: str, version: str, arch: str, version_metadata: dict) -> dict:
-    src = cfg["os_configs"][os_name]["sources"][version]
+    """Build a sync plan for the specified OS/version/arch"""
+    
+    # Get source configuration
+    os_cfg = cfg["os_configs"][os_name]
+    sources = os_cfg.get("sources", {})
+    
+    # Check if we have a source for this version
+    if version not in sources:
+        raise ValueError(f"No source configuration for {os_name} version {version}")
+    
+    src = sources[version]
     listing_url = src["listing_url"]
+    
+    # Fetch listing
     listing_html = http_get_text(listing_url, cfg)
     links = parse_listing_links(listing_html)
-    selected_filename = strict_candidate_select(links, src["filename_patterns"], arch)
-
+    
+    # Select candidate with preference
+    selected_filename, artifact_metadata = strict_candidate_select_with_preference(
+        links, src["filename_patterns"], arch
+    )
+    
+    # Fetch and parse checksum
     checksum_url = urljoin(listing_url, src["checksum_file"])
     checksum_text = http_get_text(checksum_url, cfg)
     checksum_value = parse_checksum(checksum_text, selected_filename)
-
-    release_name = src["release_name"]
-    artifact_type = src["artifact_type"]
-
+    
+    # Build plan identity
+    release_name = src.get("release_name", version)
     requested = {"os": os_name, "version": version, "arch": arch}
     plan_seed = json.dumps(requested, sort_keys=True).encode("utf-8")
     plan_id = hashlib.sha256(plan_seed).hexdigest()[:12]
+    
+    # Build cache key
     cache_key = hashlib.sha256(
         f"{os_name}|{version}|{arch}|{listing_url}|{selected_filename}|{checksum_value}".encode("utf-8")
     ).hexdigest()
-    paths = build_paths(cfg, os_name, release_name, arch, artifact_type, cache_key, plan_id)
-
+    
+    # Build paths
+    paths = build_paths(cfg, os_name, release_name, arch, artifact_metadata["disk_format"], cache_key, plan_id)
+    
+    # Ensure directories exist
     paths["plan_dir"].mkdir(parents=True, exist_ok=True)
     paths["cache_dir"].mkdir(parents=True, exist_ok=True)
     paths["report_dir"].mkdir(parents=True, exist_ok=True)
-
+    
+    # Check cache status
     cache_file = paths["cache_dir"] / selected_filename
     cache_meta = paths["cache_dir"] / f"{selected_filename}.meta.json"
     cache_status = "MISS"
@@ -386,7 +955,8 @@ def build_plan(cfg: dict, os_name: str, version: str, arch: str, version_metadat
             cache_status = "INVALID"
     elif cache_file.exists() and not cache_meta.exists():
         cache_status = "INVALID"
-
+    
+    # Build the plan
     plan = {
         "plan_id": plan_id,
         "created_at": utc_now(),
@@ -397,14 +967,17 @@ def build_plan(cfg: dict, os_name: str, version: str, arch: str, version_metadat
             "version": version,
             "release_name": release_name,
             "arch": arch,
-            "artifact_type": artifact_type,
+            "artifact_type": artifact_metadata["disk_format"],
+            "disk_format": artifact_metadata["disk_format"],
+            "source_filename": selected_filename,
             "listing_url": listing_url,
             "checksum_url": checksum_url,
             "checksum_algorithm": src["checksum_algorithm"],
             "checksum_file": src["checksum_file"],
             "selected_filename": selected_filename,
             "download_url": urljoin(listing_url, selected_filename),
-            "expected_checksum": checksum_value
+            "expected_checksum": checksum_value,
+            "artifact_metadata": artifact_metadata
         },
         "paths": {
             "plan_dir": str(paths["plan_dir"].relative_to(REPO_ROOT)),
@@ -435,11 +1008,12 @@ def build_plan(cfg: dict, os_name: str, version: str, arch: str, version_metadat
             "phase_6_download": "pending"
         }
     }
-
+    
     # Add version selection metadata if available
     if version_metadata:
         plan["version_selection"] = version_metadata
-
+    
+    # Build manifest
     manifest = {
         "plan_id": plan_id,
         "summary": {
@@ -449,26 +1023,38 @@ def build_plan(cfg: dict, os_name: str, version: str, arch: str, version_metadat
             "arch": arch,
             "selected_filename": selected_filename,
             "download_url": plan["resolved"]["download_url"],
-            "expected_checksum": checksum_value
+            "expected_checksum": checksum_value,
+            "disk_format": artifact_metadata["disk_format"],
+            "artifact_type": artifact_metadata["artifact_type"]
         }
     }
     
-    # Add selection info to manifest if available
     if version_metadata:
         manifest["summary"]["selection_mode"] = version_metadata.get("selection_mode", "explicit")
-        if version_metadata.get("selection_reason"):
-            manifest["summary"]["selection_reason"] = version_metadata["selection_reason"]
-        if version_metadata.get("discovery_log"):
-            manifest["summary"]["discovered_candidates"] = len(version_metadata["discovery_log"])
-
+        if version_metadata.get("version_selection", {}).get("selection_reason"):
+            manifest["summary"]["selection_reason"] = version_metadata["version_selection"]["selection_reason"]
+        if version_metadata.get("upstream_discovery", {}).get("discovery_log"):
+            manifest["summary"]["discovered_candidates"] = len(
+                version_metadata["upstream_discovery"]["discovery_log"]
+            )
+    
+    # Write plan files
     write_json(paths["plan_file"], plan)
     write_json(paths["manifest_file"], manifest)
     append_jsonl(paths["logs_file"], {"ts": utc_now(), "event": "dry_run_created", "plan_id": plan_id})
     append_jsonl(paths["global_log_file"], {"ts": utc_now(), "event": "dry_run_created", "plan_id": plan_id})
+    
     return plan
 
 
-def stream_download_with_progress(url: str, destination: Path, algorithm: str, cfg: dict, max_retries: int = 3) -> tuple[str, int]:
+def stream_download_with_progress(
+    url: str,
+    destination: Path,
+    algorithm: str,
+    cfg: dict,
+    max_retries: int = 3
+) -> tuple[str, int]:
+    """Download file with progress reporting and retry logic"""
     ensure_allowed_host(url, cfg)
     
     last_exception = None
@@ -490,6 +1076,7 @@ def stream_download_with_progress(url: str, destination: Path, algorithm: str, c
 
 
 def _do_stream_download(url: str, destination: Path, algorithm: str, cfg: dict) -> tuple[str, int]:
+    """Internal download implementation with progress"""
     req = urllib.request.Request(url, headers={"User-Agent": cfg["user_agent"]})
     hasher = hashlib.new(algorithm)
     start_time = datetime.now(timezone.utc)
@@ -565,10 +1152,7 @@ def _do_stream_download(url: str, destination: Path, algorithm: str, cfg: dict) 
 
 
 def check_cache_stale(meta: dict, plan: dict) -> tuple[bool, str]:
-    """
-    Check if cached metadata is stale compared to plan.
-    Returns (is_stale, reason)
-    """
+    """Check if cached metadata is stale compared to plan"""
     expected_checksum = plan["resolved"]["expected_checksum"]
     expected_url = plan["resolved"]["download_url"]
     expected_filename = plan["resolved"]["selected_filename"]
@@ -586,7 +1170,9 @@ def check_cache_stale(meta: dict, plan: dict) -> tuple[bool, str]:
 
 
 def execute_from_plan(cfg: dict, plan_id: str) -> dict:
+    """Execute download from an existing plan"""
     global _interrupted
+    
     plan_file = REPO_ROOT / cfg["state_root"] / plan_id / "plan.json"
     if not plan_file.exists():
         raise FileNotFoundError(f"plan not found: {plan_file}")
@@ -614,7 +1200,6 @@ def execute_from_plan(cfg: dict, plan_id: str) -> dict:
         if is_stale:
             cache_status = "STALE"
             print(f"[INFO] Cache is STALE ({stale_reason}), re-downloading...")
-            # Clean up stale cache files
             if cache_file.exists():
                 cache_file.unlink()
             if cache_meta.exists():
@@ -639,12 +1224,10 @@ def execute_from_plan(cfg: dict, plan_id: str) -> dict:
     cache_file.parent.mkdir(parents=True, exist_ok=True)
     tmp_file = cache_file.with_suffix(cache_file.suffix + ".partial")
 
-    # Check for existing partial file and clean it
     if tmp_file.exists():
         print(f"[INFO] Cleaning up stale partial file: {tmp_file}")
         tmp_file.unlink()
 
-    # Register signal handler for clean interrupt
     old_sigint = signal.signal(signal.SIGINT, _signal_handler)
 
     try:
@@ -693,12 +1276,12 @@ def execute_from_plan(cfg: dict, plan_id: str) -> dict:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="sync image planner and downloader")
+    parser = argparse.ArgumentParser(description="Sync image planner and downloader")
     parser.add_argument("os", nargs="?")
     parser.add_argument("version", nargs="?")
     parser.add_argument("arch", nargs="?", default="amd64")
-    parser.add_argument("--execute", action="store_true", help="download using an existing plan")
-    parser.add_argument("--plan-id", help="existing plan id for execute mode")
+    parser.add_argument("--execute", action="store_true", help="Download using an existing plan")
+    parser.add_argument("--plan-id", help="Existing plan id for execute mode")
     args = parser.parse_args()
 
     cfg = load_config()

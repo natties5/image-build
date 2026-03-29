@@ -1,9 +1,12 @@
 {
   "os": "debian",
+  "enabled": true,
   "min_version": "12",
   "max_version": null,
   "selection_policy": "latest",
   "release_channel": "stable",
+  "default_arch": "x86_64",
+  "notes": "Debian with dynamic upstream discovery. Supports explicit, auto, and latest modes.",
   "aliases": {
     "bookworm": "12",
     "trixie": "13"
@@ -13,6 +16,17 @@
     "x86_64": "x86_64",
     "arm64": "aarch64",
     "aarch64": "aarch64"
+  },
+  "discovery": {
+    "method": "html_directory_listing",
+    "url": "https://cloud.debian.org/images/cloud/",
+    "version_pattern": "^(bookworm|trixie|sid)/?$",
+    "release_mapping": {
+      "bookworm": "12",
+      "trixie": "13",
+      "sid": "unstable"
+    },
+    "exclude_unstable": true
   },
   "sources": {
     "12": {
