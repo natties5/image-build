@@ -4,20 +4,44 @@
 
 This document describes the image synchronization system with a new **central CLI menu** (`image`) that provides a unified interface for managing OS images across subsystems.
 
-### Domain-Based Architecture (New)
+### Domain-Based Architecture (Strict)
 
-The repository has been refactored into a clean domain-based structure:
+The repository has been refactored into a strict domain-based structure. The repository root is kept clean, and all image-related code, config, and runtime data lives under `/image`:
 
 ```
 image-build/
-├── center/         # Central menu and routing
-├── image/          # Image domain (sync, pull, status, setting, clean)
-├── openstack/      # Placeholder for future OpenStack work
-├── guest_config/   # Placeholder for future guest config work
-├── tools/          # Legacy preserved
-│   └── sync/sync_image.py  # Backend (preserved)
-└── image_cli.py    # Main entry point
+├── center/              # Central menu and routing only
+│
+├── image/               # Image domain owns everything image-related
+│   ├── menu.py         # Image domain menu
+│   ├── backend/        # Image backend (sync_image.py)
+│   ├── services/       # Business logic services
+│   ├── adapters/       # External adapters
+│   ├── config/         # Image config (moved from root)
+│   │   ├── sync-config.json
+│   │   └── os/
+│   ├── runtime/        # Image runtime data (moved from root)
+│   │   ├── state/
+│   │   ├── cache/
+│   │   ├── logs/
+│   │   └── reports/
+│   └── tests/          # Image tests
+│
+├── openstack/          # Placeholder for future OpenStack work
+├── guest_config/       # Placeholder for future guest config work
+│
+├── docs/               # Documentation
+├── doc/                # Documentation (synced)
+├── image_cli.py        # Main entry point
+└── .gitignore
 ```
+
+**Key Changes:**
+- Root is kept clean - no image-owned runtime folders at repo root
+- All image config moved from `config/` to `image/config/`
+- All image runtime data moved from root to `image/runtime/`
+- Backend moved from `tools/sync/` to `image/backend/`
+- `tools/sync/sync_image.py` is now a compatibility shim
 
 ### Central Image Menu
 
@@ -381,18 +405,32 @@ image-build/
 │   ├── router.py             # Domain routing logic
 │   └── state.py              # Central state management
 │
-├── image/                     # Image domain
+├── image/                     # Image domain - OWNS all image-related code
 │   ├── menu.py               # Image domain menu
+│   ├── backend/              # Image backend (moved from tools/sync/)
+│   │   └── sync_image.py     # Main backend implementation
 │   ├── services/             # Business logic services
 │   │   ├── sync_service.py
 │   │   ├── pull_service.py
 │   │   ├── status_service.py
 │   │   ├── setting_service.py
 │   │   └── clean_service.py
-│   ├── adapters/
-│   │   └── sync_backend.py   # Bridge to existing backend
-│   └── config/
-│       └── defaults.json
+│   ├── adapters/             # External adapters
+│   │   └── sync_backend.py   # Bridge to backend
+│   ├── config/               # Image config (moved from root config/)
+│   │   ├── sync-config.json  # Global sync config
+│   │   └── os/               # Per-OS configs
+│   │       ├── ubuntu.json
+│   │       ├── debian.json
+│   │       ├── rocky.json
+│   │       ├── almalinux.json
+│   │       └── fedora.json
+│   ├── runtime/              # Image runtime data (moved from root)
+│   │   ├── state/            # Plan state storage
+│   │   ├── cache/            # Downloaded images cache
+│   │   ├── logs/             # Sync logs
+│   │   └── reports/          # Generated reports
+│   └── tests/                # Image tests
 │
 ├── openstack/                # OpenStack domain (placeholder)
 │   ├── menu.py
@@ -402,32 +440,60 @@ image-build/
 │   ├── menu.py
 │   └── README.md
 │
-├── tools/                    # Legacy (preserved)
-│   ├── image/
-│   │   └── image_cli.py      # Old CLI (preserved)
+├── tools/                    # Compatibility shims
 │   └── sync/
-│       └── sync_image.py     # Backend (preserved)
+│       └── sync_image.py     # Compatibility shim (re-exports from image/backend/)
 │
-└── image_cli.py              # Main entry point
+├── docs/                     # Documentation
+├── doc/                      # Documentation (synced)
+├── image_cli.py              # Main entry point
+└── .gitignore
 ```
+
+### What Moved
+
+**Moved to `/image` domain:**
+- Config: `config/` → `image/config/`
+- Backend: `tools/sync/sync_image.py` → `image/backend/sync_image.py`
+- State: `state/` → `image/runtime/state/`
+- Cache: `cache/` → `image/runtime/cache/`
+- Logs: `logs/` → `image/runtime/logs/`
+- Reports: `reports/` → `image/runtime/reports/`
+
+**Root is now clean** - no image-owned runtime folders remain at repo root.
 
 ### Routing Flow
 
 ```
 image_cli.py
     ↓
-center/menu.py
-    ↓ (User selects)
+center/menu.py (Central Menu)
+    ↓ (User selects domain)
     ├─→ image/menu.py         # Image domain
     ├─→ openstack/menu.py     # Placeholder
     └─→ guest_config/menu.py  # Placeholder
 ```
 
-### Backend Preservation
+Inside Image domain:
+```
+image/menu.py
+    ↓ (User selects command)
+    ├─→ sync_service → image/backend/sync_image.py
+    ├─→ pull_service → image/backend/sync_image.py
+    ├─→ status_service
+    ├─→ setting_service → image/config/os/*.json
+    └─→ clean_service → image/runtime/*/
+```
 
-**IMPORTANT**: The existing sync backend at `tools/sync/sync_image.py` is intentionally preserved and unchanged.
+### Backend Location
 
-- The backend remains fully functional
+The sync backend now lives under the image domain:
+- **Primary location**: `image/backend/sync_image.py`
+- **Compatibility shim**: `tools/sync/sync_image.py` (re-exports from new location)
+
+The backend uses paths relative to repo root:
+- Config: `image/config/`
+- Runtime: `image/runtime/`
 - `image/adapters/sync_backend.py` provides a bridge/wrapper
 - No breaking changes to existing functionality
 - Direct CLI access still works:

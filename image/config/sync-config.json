@@ -1,9 +1,9 @@
 {
   "version": 2,
-  "state_root": "state/sync/plans",
-  "cache_root": "cache/official",
-  "log_root": "logs/sync",
-  "report_root": "reports/sync",
+  "state_root": "image/runtime/state",
+  "cache_root": "image/runtime/cache",
+  "log_root": "image/runtime/logs",
+  "report_root": "image/runtime/reports",
   "request_timeout_seconds": 30,
   "allowed_hosts": [
     "cloud-images.ubuntu.com",

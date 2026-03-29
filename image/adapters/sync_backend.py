@@ -2,12 +2,12 @@
 """
 Sync Backend Adapter
 
-This module provides a clean interface to the existing sync backend
-located at tools/sync/sync_image.py. It acts as a bridge between
-the new image domain structure and the legacy sync backend.
+This module provides a clean interface to the sync backend
+located at image/backend/sync_image.py. It acts as a bridge between
+the image domain services and the sync backend.
 
-The existing backend is preserved as-is and this adapter simply
-wraps its functionality for use by the new image domain services.
+The backend lives under the image domain and this adapter wraps
+its functionality for use by the image domain services.
 """
 
 import sys
@@ -17,7 +17,7 @@ from typing import Optional, Dict, Any, Tuple, List
 
 # Repository root
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SYNC_BACKEND_PATH = REPO_ROOT / "tools" / "sync" / "sync_image.py"
+SYNC_BACKEND_PATH = REPO_ROOT / "image" / "backend" / "sync_image.py"
 
 # Load the sync backend module dynamically
 _spec = importlib.util.spec_from_file_location("sync_image", SYNC_BACKEND_PATH)
@@ -175,7 +175,7 @@ class SyncBackendAdapter:
         """
         config = self.load_config()
         plans = {}
-        state_root = REPO_ROOT / config.get("state_root", "state/sync/plans")
+        state_root = REPO_ROOT / config.get("state_root", "image/runtime/state")
         
         if not state_root.exists():
             return plans

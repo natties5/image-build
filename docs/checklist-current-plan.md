@@ -395,14 +395,77 @@ Status indicators:
 
 ---
 
-## Domain Structure Refactor Tests
+## Domain Structure Refactor Tests - Strict Migration
+
+### Root Cleaned
+- [x] Root no longer contains `config/` (moved to `image/config/`)
+- [x] Root no longer contains `state/` (moved to `image/runtime/state/`)
+- [x] Root no longer contains `cache/` (moved to `image/runtime/cache/`)
+- [x] Root no longer contains `logs/` (moved to `image/runtime/logs/`)
+- [x] Root no longer contains `reports/` (moved to `image/runtime/reports/`)
+- [x] Repository root is clean and domain-oriented
+
+### Image Domain Structure
+- [x] `image/` owns all image-related code
+- [x] `image/backend/` created and contains `sync_image.py`
+- [x] `image/config/` created and contains all image config
+- [x] `image/config/os/` created with all OS configs
+- [x] `image/runtime/` created with all runtime subdirectories
+- [x] `image/runtime/state/` contains plans
+- [x] `image/runtime/cache/` contains downloaded images
+- [x] `image/runtime/logs/` contains sync logs
+- [x] `image/runtime/reports/` contains generated reports
+
+### Backend Migration
+- [x] Backend moved from `tools/sync/sync_image.py` to `image/backend/sync_image.py`
+- [x] Backend path references updated to new config/runtime locations
+- [x] Config paths updated to `image/config/`
+- [x] Runtime paths updated to `image/runtime/`
+- [x] Compatibility shim created at `tools/sync/sync_image.py`
+
+### Service Layer Updates
+- [x] `image/adapters/sync_backend.py` updated to point to new backend location
+- [x] `image/services/setting_service.py` updated to use `image/config/os/`
+- [x] `image/services/clean_service.py` updated to use `image/runtime/` defaults
+- [x] All services can load config from new location
+- [x] All services can access runtime data from new location
+
+### Config Migration
+- [x] `config/sync-config.json` moved to `image/config/sync-config.json`
+- [x] `config/os/*.json` moved to `image/config/os/*.json`
+- [x] Config paths in backend updated
+- [x] Config paths in services updated
+- [x] Config root references updated to `image/config/`
+
+### Path Tests
+- [x] `state_root` in config points to `image/runtime/state`
+- [x] `cache_root` in config points to `image/runtime/cache`
+- [x] `log_root` in config points to `image/runtime/logs`
+- [x] `report_root` in config points to `image/runtime/reports`
+- [x] All path resolution works correctly from repo root
+
+### Compatibility
+- [x] Compatibility shim at `tools/sync/sync_image.py` works
+- [x] Old imports still work via compatibility shim
+- [x] Existing plans are accessible from new location
+- [x] Config README at root explains migration
+
+### Documentation
+- [x] Architecture docs updated with strict structure
+- [x] What moved section documented
+- [x] New path locations documented
+- [x] Compatibility shims documented
+
+---
+
+## Domain Structure Refactor Tests - Previous Round
 
 ### New Structure
 - [x] `center/` directory created
 - [x] `image/` directory created
 - [x] `openstack/` directory created
 - [x] `guest_config/` directory created
-- [x] `image.py` entry point created
+- [x] `image_cli.py` entry point created
 - [x] `docs/repo-structure.md` documentation created
 
 ### Center Domain
@@ -427,29 +490,23 @@ Status indicators:
 - [x] `guest_config/README.md` created
 
 ### Routing Tests
-- [ ] Central menu starts without errors
-- [ ] Routing to Image domain works
-- [ ] Routing to OpenStack placeholder works
-- [ ] Routing to Guest Config placeholder works
-- [ ] Return to central menu works from all domains
+- [x] Central menu starts without errors
+- [x] Routing to Image domain works
+- [x] Routing to OpenStack placeholder works
+- [x] Routing to Guest Config placeholder works
+- [x] Return to central menu works from all domains
 
 ### Integration Tests
-- [ ] Backend bridge loads existing sync backend
-- [ ] Backend bridge functions work correctly
-- [ ] Image domain services can load config
-- [ ] Image domain services can access plans
+- [x] Backend bridge loads existing sync backend
+- [x] Backend bridge functions work correctly
+- [x] Image domain services can load config
+- [x] Image domain services can access plans
 
 ### Documentation Tests
-- [ ] `docs/current-plan.md` updated with new structure
-- [ ] `docs/checklist-current-plan.md` updated
-- [ ] `docs/repo-structure.md` created
-- [ ] `doc/` directory created and synced
-
-### Backward Compatibility Tests
-- [ ] `tools/sync/sync_image.py` still works directly
-- [ ] `tools/image/image_cli.py` still works
-- [ ] Old plans are compatible with new structure
-- [ ] Config files work in both old and new paths
+- [x] `docs/current-plan.md` updated with new structure
+- [x] `docs/checklist-current-plan.md` updated
+- [x] `docs/repo-structure.md` created
+- [x] `doc/` directory created and synced
 
 ---
 

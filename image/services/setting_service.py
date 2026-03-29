@@ -79,7 +79,7 @@ class SettingService:
             True if update was successful
         """
         try:
-            os_config_path = REPO_ROOT / "config" / "os" / f"{os_name}.json"
+            os_config_path = REPO_ROOT / "image" / "config" / "os" / f"{os_name}.json"
             
             with os_config_path.open("r", encoding="utf-8") as f:
                 os_cfg = json.load(f)

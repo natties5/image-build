@@ -41,8 +41,8 @@ class CleanService:
         items = []
         plans = self.get_available_plans()
         config = self.adapter.load_config()
-        cache_root = REPO_ROOT / config.get("cache_root", "cache/official")
-        state_root = REPO_ROOT / config.get("state_root", "state/sync/plans")
+        cache_root = REPO_ROOT / config.get("cache_root", "image/runtime/cache")
+        state_root = REPO_ROOT / config.get("state_root", "image/runtime/state")
         
         if os_name in plans:
             for version in plans[os_name]:
@@ -66,14 +66,14 @@ class CleanService:
         """
         items = []
         config = self.adapter.load_config()
-        state_root = REPO_ROOT / config.get("state_root", "state/sync/plans")
-        cache_root = REPO_ROOT / config.get("cache_root", "cache/official")
-        
+        state_root = REPO_ROOT / config.get("state_root", "image/runtime/state")
+        cache_root = REPO_ROOT / config.get("cache_root", "image/runtime/cache")
+
         if state_root.exists():
             for plan_dir in state_root.iterdir():
                 if plan_dir.is_dir():
                     items.append(("plan", plan_dir))
-        
+
         if cache_root.exists():
             items.append(("cache", cache_root))
         
@@ -141,7 +141,7 @@ class CleanService:
         items = []
         plans = self.get_available_plans()
         config = self.adapter.load_config()
-        cache_root = REPO_ROOT / config.get("cache_root", "cache/official")
+        cache_root = REPO_ROOT / config.get("cache_root", "image/runtime/cache")
         
         if os_name in plans and version in plans[os_name]:
             for plan_info in plans[os_name][version]:
