@@ -1,0 +1,7 @@
+{
+  "image": {
+    "default_arch": "amd64",
+    "default_policy": "explicit",
+    "services": ["sync", "pull", "status", "setting", "clean"]
+  }
+}

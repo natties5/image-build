@@ -1,6 +1,0 @@
-#!/bin/sh
-# Central Image CLI Entry Point
-# Usage: image <command> [options]
-
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-python "${SCRIPT_DIR}/tools/image/image_cli.py" "$@"
